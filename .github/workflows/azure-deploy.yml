@@ -39,6 +39,9 @@ jobs:
       - name: Add azd to PATH
         run: echo "$HOME/.azd/bin" >> "$GITHUB_PATH"
 
+      - name: Show azd version
+        run: azd version
+
       - name: Azure login (OIDC)
         uses: azure/login@v2
         with:
@@ -96,6 +99,24 @@ jobs:
           postgresAdminPassword: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           authJwtSecret: ${{ secrets.AUTH_JWT_SECRET }}
         run: |
+          set -euo pipefail
+
+          if [ -z "${postgresAdminPassword:-}" ]; then
+            echo "Missing secret value for POSTGRES_ADMIN_PASSWORD"
+            exit 1
+          fi
+
+          if [ -z "${authJwtSecret:-}" ]; then
+            echo "Missing secret value for AUTH_JWT_SECRET"
+            exit 1
+          fi
+
+          azd env set postgresAdminPassword "$postgresAdminPassword"
+          azd env set authJwtSecret "$authJwtSecret"
+
+          echo "azd env key presence:"
+          azd env get-values | awk -F= '/^(AZURE_ENV_NAME|AZURE_LOCATION|environmentName|location|staticWebAppLocation|postgresLocation|postgresAdminPassword|authJwtSecret)=/{print $1 "=<set>"}'
+
           azd env get-value AZURE_ENV_NAME --output none >/dev/null 2>&1 || true
           azd env list
           azd provision --no-prompt
