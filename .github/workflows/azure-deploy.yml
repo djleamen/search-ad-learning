@@ -92,7 +92,13 @@ jobs:
           azd env set AUTH_JWT_SECRET "$AUTH_JWT_SECRET"
 
       - name: Provision infrastructure
-        run: azd provision --no-prompt
+        env:
+          postgresAdminPassword: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          authJwtSecret: ${{ secrets.AUTH_JWT_SECRET }}
+        run: |
+          azd env get-value AZURE_ENV_NAME --output none >/dev/null 2>&1 || true
+          azd env list
+          azd provision --no-prompt
 
       - name: Deploy backend
         run: azd deploy --no-prompt --service backend
