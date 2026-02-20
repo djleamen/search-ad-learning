@@ -94,6 +94,31 @@ jobs:
           azd env set POSTGRES_ADMIN_PASSWORD "$POSTGRES_ADMIN_PASSWORD"
           azd env set AUTH_JWT_SECRET "$AUTH_JWT_SECRET"
 
+      - name: Generate infra parameters file for CI
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          mkdir -p infra
+          cat > infra/main.parameters.json <<EOF
+          {
+            "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            "contentVersion": "1.0.0.0",
+            "parameters": {
+              "environmentName": { "value": "${AZURE_ENV_NAME}" },
+              "location": { "value": "${AZURE_LOCATION}" },
+              "staticWebAppLocation": { "value": "${STATIC_WEB_APP_LOCATION}" },
+              "postgresLocation": { "value": "${POSTGRES_LOCATION}" },
+              "postgresAdminUsername": { "value": "pgadminuser" },
+              "postgresAdminPassword": { "value": "${POSTGRES_ADMIN_PASSWORD}" },
+              "authJwtSecret": { "value": "${AUTH_JWT_SECRET}" },
+              "postgresDatabaseName": { "value": "searchadlearning" },
+              "backendTargetPort": { "value": 8001 }
+            }
+          }
+          EOF
+
       - name: Provision infrastructure
         env:
           postgresAdminPassword: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
