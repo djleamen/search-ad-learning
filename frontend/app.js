@@ -88,7 +88,41 @@ const taxonomy = {
   }
 };
 
-const backendUrl = "http://127.0.0.1:8001";
+function resolveBackendUrl() {
+    /**
+     * Resolve backend URL from runtime config with sensible local/dev fallback.
+     * Priority:
+     * 1) ?backendUrl=... query string
+     * 2) localStorage override (backendUrl)
+     * 3) <meta name="backend-url" content="...">
+     * 4) localhost default
+     */
+    const params = new URLSearchParams(window.location.search);
+    const queryOverride = params.get("backendUrl")?.trim();
+    if (queryOverride) {
+        window.localStorage.setItem("backendUrl", queryOverride);
+        return queryOverride.replace(/\/$/, "");
+    }
+
+    const storedOverride = window.localStorage.getItem("backendUrl")?.trim();
+    if (storedOverride) {
+        return storedOverride.replace(/\/$/, "");
+    }
+
+    const metaConfigured = document.querySelector('meta[name="backend-url"]')?.getAttribute("content")?.trim();
+    if (metaConfigured) {
+        return metaConfigured.replace(/\/$/, "");
+    }
+
+    const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+    if (localHosts.has(window.location.hostname)) {
+        return "http://127.0.0.1:8001";
+    }
+
+    return "";
+}
+
+const backendUrl = resolveBackendUrl();
 const userId = getOrCreateUserId();
 const categories = Object.keys(taxonomy);
 const categoryScores = Object.fromEntries(categories.map((category) => [category, 0.001]));
@@ -340,7 +374,7 @@ async function submitToBackend(query) {
      * @param {string} query - The search query to be submitted.
      * @returns {Promise<Object|null>} - Returns the backend response payload or null if the backend is offline or an error occurs.
      */
-    if (backendOnline === false) return null;
+    if (!backendUrl || backendOnline === false) return null;
 
     try {
         const response = await fetch(`${backendUrl}/search`, {
