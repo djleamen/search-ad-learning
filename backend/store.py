@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,7 +27,20 @@ class EventStore:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
+        self.segment_decay_lambda = self._load_segment_decay_lambda()
         self._init_db()
+
+    def _load_segment_decay_lambda(self) -> float:
+        """
+        Load segment decay lambda from environment.
+        :return: Non-negative decay lambda.
+        """
+        raw_value = os.getenv("SEGMENT_DECAY_LAMBDA", "0.08")
+        try:
+            value = float(raw_value)
+            return max(0.0, value)
+        except (TypeError, ValueError):
+            return 0.08
 
     def _connect(self) -> sqlite3.Connection:
         """
@@ -266,7 +280,7 @@ class EventStore:
             ).fetchall()
 
         now = datetime.now(timezone.utc)
-        decay_lambda = 0.08
+        decay_lambda = self.segment_decay_lambda
         decayed_rows = []
         for row in rows:
             updated_raw = row["updated_at"]
