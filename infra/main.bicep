@@ -103,7 +103,7 @@ module backend './modules/containerapp.bicep' = {
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
-    databaseUrlSecretValue: 'postgresql+psycopg://${postgresAdminUsername}:${postgresAdminPassword}@${postgres.outputs.postgresFqdn}:5432/${postgresDatabaseName}?sslmode=require'
+    databaseUrlSecretValue: 'postgresql+psycopg://${uriComponent(postgresAdminUsername)}:${uriComponent(postgresAdminPassword)}@${postgres.outputs.postgresFqdn}:5432/${postgresDatabaseName}?sslmode=require'
     authJwtSecretValue: authJwtSecret
   }
 }
