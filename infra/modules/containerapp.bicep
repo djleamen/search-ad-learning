@@ -11,8 +11,14 @@ param backendTargetPort int
 param logAnalyticsWorkspaceId string
 param logAnalyticsWorkspaceResourceId string
 param appInsightsConnectionString string
-param databaseUrlSecretUri string
-param authJwtSecretUri string
+@secure()
+param databaseUrlSecretValue string
+@secure()
+param authJwtSecretValue string
+
+var registryName = split(registryServer, '.')[0]
+var registryUsername = listCredentials(resourceId('Microsoft.ContainerRegistry/registries', registryName), '2023-07-01').username
+var registryPassword = listCredentials(resourceId('Microsoft.ContainerRegistry/registries', registryName), '2023-07-01').passwords[0].value
 
 resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: containerAppsEnvironmentName
@@ -44,7 +50,8 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
       registries: [
         {
           server: registryServer
-          identity: 'system'
+          username: registryUsername
+          passwordSecretRef: 'acr-password'
         }
       ]
       ingress: {
@@ -56,13 +63,15 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
       secrets: [
         {
           name: 'database-url'
-          keyVaultUrl: databaseUrlSecretUri
-          identity: 'system'
+          value: databaseUrlSecretValue
         }
         {
           name: 'auth-jwt-secret'
-          keyVaultUrl: authJwtSecretUri
-          identity: 'system'
+          value: authJwtSecretValue
+        }
+        {
+          name: 'acr-password'
+          value: registryPassword
         }
       ]
     }

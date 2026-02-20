@@ -103,16 +103,8 @@ module backend './modules/containerapp.bicep' = {
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
-    databaseUrlSecretUri: '${keyvault.outputs.keyVaultUri}secrets/DATABASE-URL'
-    authJwtSecretUri: '${keyvault.outputs.keyVaultUri}secrets/AUTH-JWT-SECRET'
-  }
-}
-
-module acrPullRole './modules/acr-pull-role.bicep' = {
-  name: 'acrPullRole'
-  params: {
-    registryName: containerRegistryName
-    principalId: backend.outputs.backendPrincipalId
+    databaseUrlSecretValue: 'postgresql+psycopg://${postgresAdminUsername}:${postgresAdminPassword}@${postgres.outputs.postgresFqdn}:5432/${postgresDatabaseName}?sslmode=require'
+    authJwtSecretValue: authJwtSecret
   }
 }
 
@@ -123,42 +115,6 @@ module frontend './modules/staticwebapp.bicep' = {
     staticWebAppName: frontendAppName
     environmentName: environmentName
     serviceName: 'frontend'
-  }
-}
-
-resource keyVaultResource 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-}
-
-resource dbUrlSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
-  parent: keyVaultResource
-  name: 'DATABASE-URL'
-  dependsOn: [
-    keyvault
-  ]
-  properties: {
-    value: 'postgresql+psycopg://${postgresAdminUsername}:${postgresAdminPassword}@${postgres.outputs.postgresFqdn}:5432/${postgresDatabaseName}?sslmode=require'
-  }
-}
-
-resource jwtSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
-  parent: keyVaultResource
-  name: 'AUTH-JWT-SECRET'
-  dependsOn: [
-    keyvault
-  ]
-  properties: {
-    value: authJwtSecret
-  }
-}
-
-resource backendKvReadRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVaultName, backendAppName, 'kv-secrets-user')
-  scope: keyVaultResource
-  properties: {
-    principalId: backend.outputs.backendPrincipalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
   }
 }
 
