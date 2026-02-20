@@ -1,6 +1,7 @@
 # Search Ad Learning
 
-Search UI that evolves into a word cloud and audience-segment view, backed by a Python machine-learning taxonomy service.
+Search UI that evolves into a word cloud and audience-segment view, 
+backed by a Python machine-learning taxonomy service.
 
 ## Features
 
