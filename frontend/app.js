@@ -88,24 +88,41 @@ const taxonomy = {
   }
 };
 
+function isAllowedBackendUrl(url) {
+    /**
+     * Validate that a backend URL is safe to use (HTTPS or localhost).
+     * Prevents open-redirect attacks via the backendUrl parameter.
+     * @param {string} url - The URL to validate.
+     * @returns {boolean}
+     */
+    try {
+        const parsed = new URL(url);
+        const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+        if (localHosts.has(parsed.hostname)) return true;
+        return parsed.protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
 function resolveBackendUrl() {
     /**
      * Resolve backend URL from runtime config with sensible local/dev fallback.
      * Priority:
-     * 1) ?backendUrl=... query string
-     * 2) localStorage override (backendUrl)
+     * 1) ?backendUrl=... query string (validated)
+     * 2) localStorage override (backendUrl, validated)
      * 3) <meta name="backend-url" content="...">
      * 4) localhost default
      */
     const params = new URLSearchParams(window.location.search);
     const queryOverride = params.get("backendUrl")?.trim();
-    if (queryOverride) {
+    if (queryOverride && isAllowedBackendUrl(queryOverride)) {
         window.localStorage.setItem("backendUrl", queryOverride);
         return queryOverride.replace(/\/$/, "");
     }
 
     const storedOverride = window.localStorage.getItem("backendUrl")?.trim();
-    if (storedOverride) {
+    if (storedOverride && isAllowedBackendUrl(storedOverride)) {
         return storedOverride.replace(/\/$/, "");
     }
 
