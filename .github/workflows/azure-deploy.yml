@@ -103,7 +103,7 @@ jobs:
           mkdir -p infra
           cat > infra/main.parameters.json <<EOF
           {
-            "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            "\$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
             "contentVersion": "1.0.0.0",
             "parameters": {
               "environmentName": { "value": "${AZURE_ENV_NAME}" },
