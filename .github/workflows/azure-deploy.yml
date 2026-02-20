@@ -67,6 +67,8 @@ jobs:
           azd env set AZURE_LOCATION "$AZURE_LOCATION"
           azd env set STATIC_WEB_APP_LOCATION "$STATIC_WEB_APP_LOCATION"
           azd env set POSTGRES_LOCATION "$POSTGRES_LOCATION"
+          azd env set postgresAdminPassword "$POSTGRES_ADMIN_PASSWORD"
+          azd env set authJwtSecret "$AUTH_JWT_SECRET"
           azd env set POSTGRES_ADMIN_PASSWORD "$POSTGRES_ADMIN_PASSWORD"
           azd env set AUTH_JWT_SECRET "$AUTH_JWT_SECRET"
 
