@@ -49,7 +49,8 @@ jobs:
       - name: azd auth login
         env:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-        run: azd auth login --client-id "$AZURE_CLIENT_ID" --federated-credential-provider github
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: azd auth login --client-id "$AZURE_CLIENT_ID" --tenant-id "$AZURE_TENANT_ID" --federated-credential-provider github
 
       - name: Configure azd environment
         env:
