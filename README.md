@@ -1,5 +1,7 @@
 # Search Ad Learning
 
+**Visualization demo of how search engines determine ad topics and audience segments.**
+
 Search UI that evolves into a word cloud and audience-segment view, 
 backed by a Python machine-learning taxonomy service.
 
