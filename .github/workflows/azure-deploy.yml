@@ -24,6 +24,7 @@ env:
   AZURE_LOCATION: eastus2
   STATIC_WEB_APP_LOCATION: eastus2
   POSTGRES_LOCATION: eastus2
+  AZURE_RESOURCE_GROUP: rg-search-ad-learning-dev
 
 jobs:
   deploy:
@@ -83,6 +84,7 @@ jobs:
           azd env set AZURE_TENANT_ID "$AZURE_TENANT_ID"
           azd env set AZURE_CLIENT_ID "$AZURE_CLIENT_ID"
           azd env set AZURE_LOCATION "$AZURE_LOCATION"
+          azd env set AZURE_RESOURCE_GROUP "$AZURE_RESOURCE_GROUP"
           azd env set STATIC_WEB_APP_LOCATION "$STATIC_WEB_APP_LOCATION"
           azd env set POSTGRES_LOCATION "$POSTGRES_LOCATION"
           azd env set environmentName "$AZURE_ENV_NAME"
@@ -168,7 +170,9 @@ jobs:
           azd env get-value postgresAdminPassword >/dev/null
 
           echo "azd env key presence:"
-          azd env get-values | awk -F= '/^(AZURE_ENV_NAME|AZURE_LOCATION|environmentName|location|staticWebAppLocation|postgresLocation|postgresAdminPassword|authJwtSecret)=/{print $1 "=<set>"}'
+          azd env get-values | awk -F= '/^(AZURE_ENV_NAME|AZURE_LOCATION|AZURE_RESOURCE_GROUP|environmentName|location|staticWebAppLocation|postgresLocation|postgresAdminPassword|authJwtSecret)=/{print $1 "=<set>"}'
+
+          az group create --name "$AZURE_RESOURCE_GROUP" --location "$AZURE_LOCATION" >/dev/null
 
           azd env get-value AZURE_ENV_NAME >/dev/null 2>&1 || true
           azd env list
