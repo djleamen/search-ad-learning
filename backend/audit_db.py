@@ -152,7 +152,8 @@ def main() -> None:
         print(category, count)
 
     print("\n=== CONFIRMED CATEGORY DISTRIBUTION ===")
-    confirmed_counts = Counter(row["confirmed_category"] for row in rows if row["confirmed_category"])
+    confirmed_counts = Counter(row["confirmed_category"]
+                               for row in rows if row["confirmed_category"])
     for category, count in confirmed_counts.most_common():
         print(category, count)
 

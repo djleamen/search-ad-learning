@@ -55,7 +55,7 @@ def health() -> Dict[str, str]:
     Health check endpoint.
     :return: A simple status message indicating the service is running.
     """
-    return {"status": "ok", "model": "sgd-log-loss-hashing"}
+    return {"status": "ok", "model": "sgd-log-loss-hashing+user-embedding"}
 
 
 @app.get("/taxonomy")
@@ -81,6 +81,29 @@ def history(limit: int = Query(default=20, ge=1, le=200)) -> Dict[str, object]:
     }
 
 
+@app.get("/embedding")
+def embedding(limit: int = Query(default=6, ge=1, le=20)) -> Dict[str, object]:
+    """
+    Inspect the persisted user embedding and top similarity categories.
+    :param limit: Number of top categories to return.
+    :return: Embedding diagnostics for drift monitoring.
+    """
+    vector = event_store.get_user_embedding(
+        dimensions=model_service.embedding_dimensions)
+    probabilities = model_service.category_probabilities_from_user_embedding(vector)
+    ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
+    norm = sum(value * value for value in vector) ** 0.5
+
+    return {
+        "dimensions": model_service.embedding_dimensions,
+        "vector_norm": float(norm),
+        "top_categories": [
+            {"category": category, "probability": float(probability)}
+            for category, probability in ranked[:limit]
+        ],
+    }
+
+
 @app.post("/history/clear")
 def clear_history() -> Dict[str, str]:
     """
@@ -100,29 +123,56 @@ def search(payload: SearchRequest) -> Dict[str, object]:
     """
     model_probabilities = model_service.predict_proba(payload.query)
     lexical_probabilities = lexical_category_probabilities(payload.query)
+    user_embedding = event_store.get_user_embedding(
+        dimensions=model_service.embedding_dimensions)
+    updated_user_embedding = model_service.update_user_embedding(
+        user_embedding,
+        payload.query,
+        decay=0.95,
+        learning_rate=0.05,
+    )
+    event_store.set_user_embedding(updated_user_embedding)
+    embedding_probabilities = model_service.category_probabilities_from_user_embedding(
+        updated_user_embedding)
 
     lexical_peak = max(lexical_probabilities.values())
     lexical_weight = min(0.68, 0.34 + lexical_peak * 0.65)
     model_weight = 1.0 - lexical_weight
 
     blended = {
-        category: model_probabilities[category] * model_weight + lexical_probabilities[category] * lexical_weight
+        category: model_probabilities[category] * model_weight +
+        lexical_probabilities[category] * lexical_weight
         for category in CATEGORY_LIST
     }
-    total = sum(blended.values()) or 1.0
-    probabilities = {category: value / total for category, value in blended.items()}
+    embedding_peak = max(embedding_probabilities.values())
+    embedding_weight = min(0.60, 0.26 + embedding_peak * 0.45)
+    baseline_weight = 1.0 - embedding_weight
+    fused = {
+        category: blended[category] * baseline_weight +
+        embedding_probabilities[category] * embedding_weight
+        for category in CATEGORY_LIST
+    }
+    total = sum(fused.values()) or 1.0
+    probabilities = {category: value /
+                     total for category, value in fused.items()}
 
-    predicted_category = max(probabilities.items(), key=lambda item: item[1])[0]
+    predicted_category = max(probabilities.items(),
+                             key=lambda item: item[1])[0]
     predicted_score = probabilities[predicted_category]
 
     tag_updates = expand_query_to_tags(payload.query, probabilities, top_k=40)
-    event_store.record_search(payload.query, predicted_category, probabilities, tag_updates)
+    event_store.record_search(
+        payload.query, predicted_category, probabilities, tag_updates)
 
     model_top = max(model_probabilities.items(), key=lambda item: item[1])[0]
-    lexical_top = max(lexical_probabilities.items(), key=lambda item: item[1])[0]
+    lexical_top = max(lexical_probabilities.items(),
+                      key=lambda item: item[1])[0]
+    embedding_top = max(embedding_probabilities.items(),
+                        key=lambda item: item[1])[0]
 
-    if predicted_score >= 0.62 and (model_top == lexical_top or lexical_peak < 0.28):
-        model_service.online_update(payload.query, predicted_category, sample_weight=0.35)
+    if predicted_score >= 0.58 and (model_top == lexical_top or lexical_peak < 0.28 or embedding_top == predicted_category):
+        model_service.online_update(
+            payload.query, predicted_category, sample_weight=0.35)
 
     top_segments = event_store.get_top_segments(limit=6)
     cloud_words = event_store.get_cloud_words(limit=180)
@@ -136,6 +186,8 @@ def search(payload: SearchRequest) -> Dict[str, object]:
         "model_source": "python-backend",
         "model_top": model_top,
         "lexical_top": lexical_top,
+        "embedding_top": embedding_top,
+        "embedding_weight": embedding_weight,
     }
 
 
@@ -149,8 +201,10 @@ def feedback(payload: FeedbackRequest) -> Dict[str, object]:
     if payload.category not in CATEGORY_LIST:
         raise HTTPException(status_code=400, detail="Unknown category")
 
-    event_store.record_feedback(payload.query, payload.category, payload.confidence)
-    model_service.online_update(payload.query, payload.category, sample_weight=payload.confidence)
+    event_store.record_feedback(
+        payload.query, payload.category, payload.confidence)
+    model_service.online_update(
+        payload.query, payload.category, sample_weight=payload.confidence)
 
     return {
         "status": "updated",

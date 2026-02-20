@@ -9,13 +9,14 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 
 class EventStore:
     """
     Event Store for recording search events, feedback, and maintaining category/tag totals.
     """
+
     def __init__(self, db_path: Path) -> None:
         """
         Initialize the EventStore.
@@ -68,6 +69,11 @@ class EventStore:
                     category TEXT NOT NULL,
                     score REAL NOT NULL DEFAULT 0
                 );
+
+                CREATE TABLE IF NOT EXISTS user_embedding (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    vector_json TEXT NOT NULL
+                );
                 """
             )
             connection.commit()
@@ -95,7 +101,8 @@ class EventStore:
                     INSERT INTO search_events (query, predicted_category, probabilities_json, created_at)
                     VALUES (?, ?, ?, ?)
                     """,
-                    (query, predicted_category, json.dumps(probabilities), timestamp),
+                    (query, predicted_category, json.dumps(
+                        probabilities), timestamp),
                 )
 
                 for category, score in probabilities.items():
@@ -153,7 +160,58 @@ class EventStore:
                     DELETE FROM search_events;
                     DELETE FROM category_totals;
                     DELETE FROM tag_totals;
+                    DELETE FROM user_embedding;
                     """
+                )
+                connection.commit()
+
+    def get_user_embedding(self, dimensions: int) -> List[float]:
+        """
+        Retrieve the persisted user embedding vector.
+        :param dimensions: Expected embedding dimensionality.
+        :return: A dense embedding vector with the requested dimensionality.
+        """
+        safe_dimensions = max(1, int(dimensions))
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT vector_json
+                FROM user_embedding
+                WHERE id = 1
+                """
+            ).fetchone()
+
+        if row is None:
+            return [0.0] * safe_dimensions
+
+        try:
+            vector = json.loads(row["vector_json"])
+            if not isinstance(vector, list):
+                return [0.0] * safe_dimensions
+            normalized = [float(value) for value in vector[:safe_dimensions]]
+            if len(normalized) < safe_dimensions:
+                normalized.extend([0.0] * (safe_dimensions - len(normalized)))
+            return normalized
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return [0.0] * safe_dimensions
+
+    def set_user_embedding(self, vector: Sequence[float]) -> None:
+        """
+        Persist the user embedding vector.
+        :param vector: Dense embedding vector values.
+        """
+        serialized = json.dumps([float(value) for value in vector])
+
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO user_embedding (id, vector_json)
+                    VALUES (1, ?)
+                    ON CONFLICT(id) DO UPDATE SET vector_json = excluded.vector_json
+                    """,
+                    (serialized,),
                 )
                 connection.commit()
 
@@ -264,7 +322,8 @@ class EventStore:
         output: List[Dict[str, object]] = []
         for row in rows:
             probabilities = json.loads(row["probabilities_json"])
-            ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
+            ranked = sorted(probabilities.items(),
+                            key=lambda item: item[1], reverse=True)
             output.append(
                 {
                     "id": int(row["id"]),
@@ -272,7 +331,8 @@ class EventStore:
                     "predicted_category": row["predicted_category"],
                     "created_at": row["created_at"],
                     "top_categories": [
-                        {"category": category, "probability": float(probability)}
+                        {"category": category,
+                            "probability": float(probability)}
                         for category, probability in ranked[:3]
                     ],
                     "feedback": {

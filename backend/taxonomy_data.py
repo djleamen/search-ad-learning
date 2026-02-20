@@ -206,7 +206,8 @@ def build_seed_corpus() -> List[Tuple[str, str]]:
     return samples
 
 
-def expand_query_to_tags(query: str, probabilities: Dict[str, float], top_k: int = 40) -> List[Tuple[str, str, float]]:
+def expand_query_to_tags(query: str, probabilities: Dict[str, float],
+                         top_k: int = 40) -> List[Tuple[str, str, float]]:
     """
     Expand a query into potential tags with associated categories and scores.
     :param query: The input query string.
@@ -225,9 +226,11 @@ def expand_query_to_tags(query: str, probabilities: Dict[str, float], top_k: int
             tag_tokens = tokenize_normalized(tag)
             overlap = 0.0
             if tag_tokens:
-                overlap = sum(1 for token in tag_tokens if token in query_tokens) / len(tag_tokens)
+                overlap = sum(
+                    1 for token in tag_tokens if token in query_tokens) / len(tag_tokens)
 
-            diversity = 0.15 + 0.85 * _deterministic_noise(f"{query}:{category}:{tag}")
+            diversity = 0.15 + 0.85 * \
+                _deterministic_noise(f"{query}:{category}:{tag}")
             score = probability * (0.45 + overlap * 0.9) * diversity
             scored.append((tag, category, score))
 
@@ -237,12 +240,14 @@ def expand_query_to_tags(query: str, probabilities: Dict[str, float], top_k: int
 
 def lexical_category_probabilities(query: str) -> Dict[str, float]:
     """
-    Compute lexical category probabilities for a given query based on token overlap and phrase hints.
+    Compute lexical category probabilities for a given query based on 
+    token overlap and phrase hints.
     :param query: The input query string.
     :return: A dictionary mapping categories to their lexical probabilities.
     """
     query_tokens = set(tokenize_normalized(query))
-    raw_scores: Dict[str, float] = {category: 0.01 for category in CATEGORY_LIST}
+    raw_scores: Dict[str, float] = {
+        category: 0.01 for category in CATEGORY_LIST}
 
     for category in CATEGORY_LIST:
         payload = TAXONOMY[category]
@@ -253,14 +258,16 @@ def lexical_category_probabilities(query: str) -> Dict[str, float]:
             if not phrase_tokens:
                 continue
 
-            overlap = sum(1 for token in phrase_tokens if token in query_tokens)
+            overlap = sum(
+                1 for token in phrase_tokens if token in query_tokens)
             if overlap:
                 raw_scores[category] += overlap / len(phrase_tokens)
 
             if phrase in query.lower():
                 raw_scores[category] += 0.45
 
-        hint_tokens = [normalize_token(token) for token in CATEGORY_HINTS[category]]
+        hint_tokens = [normalize_token(token)
+                       for token in CATEGORY_HINTS[category]]
         hint_overlap = sum(1 for token in hint_tokens if token in query_tokens)
         raw_scores[category] += hint_overlap * 0.55
 
@@ -269,6 +276,7 @@ def lexical_category_probabilities(query: str) -> Dict[str, float]:
                 raw_scores[category] += 1.25
 
     max_score = max(raw_scores.values())
-    exp_scores = {category: math.exp(score - max_score) for category, score in raw_scores.items()}
+    exp_scores = {category: math.exp(score - max_score)
+                  for category, score in raw_scores.items()}
     total = sum(exp_scores.values()) or 1.0
     return {category: value / total for category, value in exp_scores.items()}
