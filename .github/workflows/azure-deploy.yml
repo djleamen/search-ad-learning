@@ -60,6 +60,21 @@ jobs:
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
         run: |
+          set -euo pipefail
+
+          if [ -z "${POSTGRES_ADMIN_PASSWORD:-}" ]; then
+            POSTGRES_ADMIN_PASSWORD=$(python3 -c "import json, pathlib; p=pathlib.Path('infra/main.parameters.json'); d=json.loads(p.read_text()) if p.exists() else {}; print(d.get('parameters',{}).get('postgresAdminPassword',{}).get('value',''))")
+          fi
+
+          if [ -z "${AUTH_JWT_SECRET:-}" ]; then
+            AUTH_JWT_SECRET=$(python3 -c "import json, pathlib; p=pathlib.Path('infra/main.parameters.json'); d=json.loads(p.read_text()) if p.exists() else {}; print(d.get('parameters',{}).get('authJwtSecret',{}).get('value',''))")
+          fi
+
+          if [ -z "${POSTGRES_ADMIN_PASSWORD:-}" ] || [ -z "${AUTH_JWT_SECRET:-}" ]; then
+            echo "Missing required values for postgresAdminPassword/authJwtSecret. Set GitHub secrets POSTGRES_ADMIN_PASSWORD and AUTH_JWT_SECRET."
+            exit 1
+          fi
+
           azd env new "$AZURE_ENV_NAME" --no-prompt || azd env select "$AZURE_ENV_NAME"
           azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
           azd env set AZURE_TENANT_ID "$AZURE_TENANT_ID"
@@ -67,6 +82,10 @@ jobs:
           azd env set AZURE_LOCATION "$AZURE_LOCATION"
           azd env set STATIC_WEB_APP_LOCATION "$STATIC_WEB_APP_LOCATION"
           azd env set POSTGRES_LOCATION "$POSTGRES_LOCATION"
+          azd env set environmentName "$AZURE_ENV_NAME"
+          azd env set location "$AZURE_LOCATION"
+          azd env set staticWebAppLocation "$STATIC_WEB_APP_LOCATION"
+          azd env set postgresLocation "$POSTGRES_LOCATION"
           azd env set postgresAdminPassword "$POSTGRES_ADMIN_PASSWORD"
           azd env set authJwtSecret "$AUTH_JWT_SECRET"
           azd env set POSTGRES_ADMIN_PASSWORD "$POSTGRES_ADMIN_PASSWORD"
