@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Search Interest Learning Demo</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="cloud" aria-hidden="true"></div>
+
+    <main class="center-stage">
+      <form id="searchForm" class="search-shell" autocomplete="off">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input
+          id="searchInput"
+          type="text"
+          placeholder="Search anything..."
+          aria-label="Search"
+        />
+        <button type="submit">Search</button>
+        <button id="clearBubbleBtn" class="clear-bubble-btn" type="button">Erase history</button>
+      </form>
+      <p id="statusLine" class="status-line">Enter searches to train the audience-interest model.</p>
+      <p id="conversionHint" class="conversion-hint">Click the product you might be interested in buying!</p>
+    </main>
+
+    <section id="feedbackPanel" class="feedback-panel hidden" aria-live="polite">
+      <div id="feedbackPrompt" class="feedback-prompt">Is this correct for this category?</div>
+      <div class="feedback-actions">
+        <button id="feedbackUp" class="feedback-btn" type="button" aria-label="Thumbs up">👍</button>
+        <button id="feedbackDown" class="feedback-btn" type="button" aria-label="Thumbs down">👎</button>
+      </div>
+      <div id="feedbackCorrection" class="feedback-correction hidden">
+        <label for="feedbackCategory">Correct category</label>
+        <select id="feedbackCategory"></select>
+        <button id="feedbackSubmit" class="feedback-submit" type="button">Submit correction</button>
+      </div>
+      <div id="feedbackStatus" class="feedback-status"></div>
+    </section>
+
+    <section id="segmentPanel" class="segment-panel hidden" aria-live="polite">
+      <h2>Predicted Audience Segments</h2>
+      <div id="segmentList"></div>
+    </section>
+
+    <section id="historyPanel" class="history-panel hidden" aria-live="polite">
+      <h2>Recent Queries & Model Output</h2>
+      <div id="historyList" class="history-list"></div>
+    </section>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.azure/
+
+# Sensitive IaC parameter files
+*.parameters.json
+
+# Common secrets/certificates/keys
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+id_rsa
+id_rsa.pub
+
+node_modules/
+.git/
+backend/runtime/
+backend/artifacts/
+infra/

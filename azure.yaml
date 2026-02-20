@@ -1,0 +1,21 @@
+name: search-ad-learning
+metadata:
+  template: search-ad-learning@0.1.0
+
+infra:
+  provider: bicep
+  path: infra
+
+services:
+  backend:
+    project: ./backend
+    language: py
+    host: containerapp
+    docker:
+      path: Dockerfile
+      context: .
+
+  frontend:
+    project: ./frontend
+    host: staticwebapp
+    dist: .

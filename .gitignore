@@ -1,0 +1,42 @@
+.venv
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
+*.env
+.env.*
+!.env.example
+*.bak
+*.tmp
+*.swp
+.DS_Store
+.idea/
+.vscode/
+dist/
+build/
+
+artifacts/
+runtime/
+
+# Azure local environment/state (contains deployment secrets)
+.azure/
+
+# Sensitive IaC parameter files
+infra/main.parameters.json
+*.parameters.json
+
+federated-credential.json
+
+# Common secrets/certificates/keys
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+id_rsa
+id_rsa.pub
