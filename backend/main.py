@@ -4,6 +4,7 @@ Main FastAPI application for the search taxonomy ML backend.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -13,11 +14,47 @@ from pydantic import BaseModel, Field
 
 from .model_service import TaxonomyModelService
 from .store import EventStore
-from .taxonomy_data import CATEGORY_LIST, expand_query_to_tags, lexical_category_probabilities
+from .taxonomy_data import (
+    CATEGORY_LIST,
+    classify_intent_probabilities,
+    expand_query_to_tags,
+    lexical_category_probabilities,
+)
 
 ROOT = Path(__file__).resolve().parent
 ARTIFACT_DIR = ROOT / "artifacts"
 DB_FILE = ROOT / "runtime" / "events.db"
+
+COMMERCE_ORIENTED_CATEGORIES = {
+    "/Shopping",
+    "/Finance",
+    "/Real Estate",
+    "/Autos & Vehicles",
+    "/Travel",
+    "/Business & Industrial",
+}
+
+
+def _env_float(name: str, default: float) -> float:
+    """
+    Parse an environment variable as float.
+    :param name: Environment variable name.
+    :param default: Fallback default value.
+    :return: Parsed float or default.
+    """
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return float(raw_value)
+    except ValueError:
+        return default
+
+
+TRANSACTIONAL_INTENT_THRESHOLD = min(
+    1.0,
+    max(0.0, _env_float("TRANSACTIONAL_INTENT_THRESHOLD", 0.30)),
+)
 
 model_service = TaxonomyModelService(artifact_dir=ARTIFACT_DIR)
 event_store = EventStore(db_path=DB_FILE)
@@ -123,6 +160,9 @@ def search(payload: SearchRequest) -> Dict[str, object]:
     """
     model_probabilities = model_service.predict_proba(payload.query)
     lexical_probabilities = lexical_category_probabilities(payload.query)
+    intent_probabilities = classify_intent_probabilities(payload.query)
+    intent_top = max(intent_probabilities.items(), key=lambda item: item[1])[0]
+    transactional_intent_score = intent_probabilities.get("transactional", 0.0)
     user_embedding = event_store.get_user_embedding(
         dimensions=model_service.embedding_dimensions)
     updated_user_embedding = model_service.update_user_embedding(
@@ -152,6 +192,13 @@ def search(payload: SearchRequest) -> Dict[str, object]:
         embedding_probabilities[category] * embedding_weight
         for category in CATEGORY_LIST
     }
+
+    if transactional_intent_score >= TRANSACTIONAL_INTENT_THRESHOLD:
+        intent_boost = 1.0 + min(0.45, transactional_intent_score * 0.50)
+        for category in COMMERCE_ORIENTED_CATEGORIES:
+            if category in fused:
+                fused[category] *= intent_boost
+
     total = sum(fused.values()) or 1.0
     probabilities = {category: value /
                      total for category, value in fused.items()}
@@ -162,7 +209,12 @@ def search(payload: SearchRequest) -> Dict[str, object]:
 
     tag_updates = expand_query_to_tags(payload.query, probabilities, top_k=40)
     event_store.record_search(
-        payload.query, predicted_category, probabilities, tag_updates)
+        payload.query,
+        predicted_category,
+        probabilities,
+        intent_probabilities,
+        tag_updates,
+    )
 
     model_top = max(model_probabilities.items(), key=lambda item: item[1])[0]
     lexical_top = max(lexical_probabilities.items(),
@@ -170,9 +222,16 @@ def search(payload: SearchRequest) -> Dict[str, object]:
     embedding_top = max(embedding_probabilities.items(),
                         key=lambda item: item[1])[0]
 
+    online_sample_weight = 0.35
+    if transactional_intent_score >= TRANSACTIONAL_INTENT_THRESHOLD:
+        online_sample_weight = min(0.9, online_sample_weight + 0.25 + transactional_intent_score * 0.2)
+
     if predicted_score >= 0.58 and (model_top == lexical_top or lexical_peak < 0.28 or embedding_top == predicted_category):
         model_service.online_update(
-            payload.query, predicted_category, sample_weight=0.35)
+            payload.query,
+            predicted_category,
+            sample_weight=online_sample_weight,
+        )
 
     top_segments = event_store.get_top_segments(limit=6)
     cloud_words = event_store.get_cloud_words(limit=180)
@@ -188,6 +247,9 @@ def search(payload: SearchRequest) -> Dict[str, object]:
         "lexical_top": lexical_top,
         "embedding_top": embedding_top,
         "embedding_weight": embedding_weight,
+        "intent_top": intent_top,
+        "intent_probabilities": intent_probabilities,
+        "online_sample_weight": online_sample_weight,
     }
 
 

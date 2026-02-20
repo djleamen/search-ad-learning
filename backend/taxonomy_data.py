@@ -126,6 +126,76 @@ CATEGORY_PHRASE_HINTS: Dict[str, List[str]] = {
     "/Computers & Electronics": ["python code", "source code", "software", "computer", "keyboard", "microsoft"],
 }
 
+INTENT_LIST: List[str] = [
+    "informational",
+    "transactional",
+    "commercial_investigation",
+    "navigational",
+    "local",
+    "life_event",
+]
+
+INTENT_KEYWORDS: Dict[str, List[str]] = {
+    "transactional": [
+        "buy",
+        "deal",
+        "cheap",
+        "discount",
+        "coupon",
+        "order",
+        "book now",
+        "for sale",
+        "pricing",
+    ],
+    "informational": [
+        "how to",
+        "what is",
+        "guide",
+        "tutorial",
+        "learn",
+        "tips",
+        "why",
+        "explained",
+    ],
+    "commercial_investigation": [
+        "best",
+        "compare",
+        "vs",
+        "reviews",
+        "top",
+        "alternatives",
+        "worth it",
+    ],
+    "navigational": [
+        "official site",
+        "login",
+        "homepage",
+        "support",
+        "contact",
+        "app",
+        "download",
+    ],
+    "local": [
+        "near me",
+        "nearby",
+        "open now",
+        "in toronto",
+        "closest",
+        "local",
+    ],
+    "life_event": [
+        "wedding",
+        "new baby",
+        "newborn",
+        "moving",
+        "relocation",
+        "graduation",
+        "retirement",
+        "funeral",
+        "divorce",
+    ],
+}
+
 
 def tokenize(text: str) -> List[str]:
     """
@@ -280,3 +350,40 @@ def lexical_category_probabilities(query: str) -> Dict[str, float]:
                   for category, score in raw_scores.items()}
     total = sum(exp_scores.values()) or 1.0
     return {category: value / total for category, value in exp_scores.items()}
+
+
+def classify_intent_probabilities(query: str) -> Dict[str, float]:
+    """
+    Classify query intent probabilities using lightweight keyword features.
+    :param query: Input query text.
+    :return: A normalized intent probability distribution.
+    """
+    lowered_query = query.lower().strip()
+    query_tokens = set(tokenize_normalized(lowered_query))
+
+    raw_scores: Dict[str, float] = {intent: 0.01 for intent in INTENT_LIST}
+
+    for intent, keywords in INTENT_KEYWORDS.items():
+        for keyword in keywords:
+            normalized_keyword = keyword.lower().strip()
+            if " " in normalized_keyword:
+                if normalized_keyword in lowered_query:
+                    raw_scores[intent] += 1.45
+            else:
+                token = normalize_token(normalized_keyword)
+                if token in query_tokens:
+                    raw_scores[intent] += 0.9
+
+    if lowered_query.startswith(("how ", "what ", "why ", "when ", "where ")):
+        raw_scores["informational"] += 0.9
+
+    if " vs " in f" {lowered_query} ":
+        raw_scores["commercial_investigation"] += 1.0
+
+    max_score = max(raw_scores.values())
+    exp_scores = {
+        intent: math.exp(score - max_score)
+        for intent, score in raw_scores.items()
+    }
+    total = sum(exp_scores.values()) or 1.0
+    return {intent: value / total for intent, value in exp_scores.items()}

@@ -63,6 +63,7 @@ class EventStore:
                     query TEXT NOT NULL,
                     predicted_category TEXT NOT NULL,
                     probabilities_json TEXT NOT NULL,
+                    intent_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
 
@@ -92,8 +93,35 @@ class EventStore:
                 );
                 """
             )
+            self._ensure_search_events_schema(connection)
             self._ensure_category_totals_schema(connection)
             connection.commit()
+
+    def _ensure_search_events_schema(self, connection: sqlite3.Connection) -> None:
+        """
+        Ensure search_events has intent_json column.
+        :param connection: Active SQLite connection.
+        """
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(search_events)").fetchall()
+        }
+        if "intent_json" in columns:
+            return
+
+        connection.execute(
+            """
+            ALTER TABLE search_events
+            ADD COLUMN intent_json TEXT
+            """
+        )
+        connection.execute(
+            """
+            UPDATE search_events
+            SET intent_json = '{}'
+            WHERE intent_json IS NULL OR intent_json = ''
+            """
+        )
 
     def _ensure_category_totals_schema(self, connection: sqlite3.Connection) -> None:
         """
@@ -128,6 +156,7 @@ class EventStore:
         query: str,
         predicted_category: str,
         probabilities: Dict[str, float],
+        intent_probabilities: Dict[str, float],
         tag_updates: Sequence[Tuple[str, str, float]],
     ) -> None:
         """
@@ -143,11 +172,16 @@ class EventStore:
             with self._connect() as connection:
                 connection.execute(
                     """
-                    INSERT INTO search_events (query, predicted_category, probabilities_json, created_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO search_events (query, predicted_category, probabilities_json, intent_json, created_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (query, predicted_category, json.dumps(
-                        probabilities), timestamp),
+                    (
+                        query,
+                        predicted_category,
+                        json.dumps(probabilities),
+                        json.dumps(intent_probabilities),
+                        timestamp,
+                    ),
                 )
 
                 for category, score in probabilities.items():
@@ -368,6 +402,7 @@ class EventStore:
                                         se.query,
                                         se.predicted_category,
                                         se.probabilities_json,
+                                    se.intent_json,
                                         se.created_at,
                                         fe.true_category AS feedback_category,
                                         fe.confidence AS feedback_confidence,
@@ -390,14 +425,24 @@ class EventStore:
         output: List[Dict[str, object]] = []
         for row in rows:
             probabilities = json.loads(row["probabilities_json"])
+            intent_probabilities = json.loads(row["intent_json"] or "{}")
             ranked = sorted(probabilities.items(),
                             key=lambda item: item[1], reverse=True)
+            ranked_intents = sorted(
+                intent_probabilities.items(),
+                key=lambda item: item[1],
+                reverse=True,
+            )
             output.append(
                 {
                     "id": int(row["id"]),
                     "query": row["query"],
                     "predicted_category": row["predicted_category"],
                     "created_at": row["created_at"],
+                    "top_intents": [
+                        {"intent": intent, "probability": float(probability)}
+                        for intent, probability in ranked_intents[:3]
+                    ],
                     "top_categories": [
                         {"category": category,
                             "probability": float(probability)}
