@@ -101,6 +101,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          trim_trailing_newlines() {
+            local value="$1"
+            while [[ "$value" == *$'\n' ]]; do
+              value="${value%$'\n'}"
+            done
+            printf '%s' "$value"
+          }
+
           if [ -z "${postgresAdminPassword:-}" ]; then
             echo "Missing secret value for POSTGRES_ADMIN_PASSWORD"
             exit 1
@@ -111,18 +119,20 @@ jobs:
             exit 1
           fi
 
+          postgresAdminPassword="${postgresAdminPassword//$'\r'/}"
+          authJwtSecret="${authJwtSecret//$'\r'/}"
+          postgresAdminPassword="$(trim_trailing_newlines "$postgresAdminPassword")"
+          authJwtSecret="$(trim_trailing_newlines "$authJwtSecret")"
+
           if printf '%s' "$postgresAdminPassword" | grep -q $'\n'; then
-            echo "POSTGRES_ADMIN_PASSWORD contains a newline; please re-save it as a single-line secret."
+            echo "POSTGRES_ADMIN_PASSWORD contains an embedded newline; re-save it as a single-line secret."
             exit 1
           fi
 
           if printf '%s' "$authJwtSecret" | grep -q $'\n'; then
-            echo "AUTH_JWT_SECRET contains a newline; please re-save it as a single-line secret."
+            echo "AUTH_JWT_SECRET contains an embedded newline; re-save it as a single-line secret."
             exit 1
           fi
-
-          postgresAdminPassword="${postgresAdminPassword//$'\r'/}"
-          authJwtSecret="${authJwtSecret//$'\r'/}"
 
           azd env set authJwtSecret "$authJwtSecret"
           azd env set postgresAdminPassword "$postgresAdminPassword"
