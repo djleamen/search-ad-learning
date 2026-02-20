@@ -101,8 +101,12 @@ let latestPrediction = null;
 let bubbleCleared = false;
 let selectedCloudTagKey = null;
 const conversionNotifications = [];
+let searchBarDocked = false;
+let dockAnimationPromise = null;
+let cloudPointerLocal = null;
 
 const cloudEl = document.getElementById("cloud");
+const centerStageEl = document.querySelector(".center-stage");
 const formEl = document.getElementById("searchForm");
 const inputEl = document.getElementById("searchInput");
 const statusLineEl = document.getElementById("statusLine");
@@ -148,6 +152,20 @@ window.addEventListener("resize", () => {
   }
 });
 
+cloudEl?.addEventListener("mousemove", (event) => {
+        const bounds = cloudEl.getBoundingClientRect();
+        cloudPointerLocal = {
+                x: event.clientX - bounds.left,
+                y: event.clientY - bounds.top,
+        };
+        applyCursorPull();
+});
+
+cloudEl?.addEventListener("mouseleave", () => {
+        cloudPointerLocal = null;
+        applyCursorPull();
+});
+
 clearBubbleBtnEl?.addEventListener("click", async () => {
     /**
      * Handle the "Clear Bubble" button click event. 
@@ -165,6 +183,7 @@ clearBubbleBtnEl?.addEventListener("click", async () => {
 
     bubbleCleared = true;
     searchCount = 0;
+    resetSearchBarDocking();
     cloudEl.style.opacity = "0";
     cloudEl.innerHTML = "";
 
@@ -203,9 +222,86 @@ formEl.addEventListener("submit", async (event) => {
         renderHistory();
     }
 
+    await ensureSearchBarDocked();
     renderCloud();
     renderSegments();
 });
+
+function ensureSearchBarDocked() {
+    /**
+     * Move the search shell from center to top once and resolve
+     * when the glide animation has completed.
+     * @returns {Promise<void>}
+     */
+    if (searchBarDocked || !centerStageEl) {
+        searchBarDocked = true;
+        return Promise.resolve();
+    }
+
+    if (dockAnimationPromise) {
+        return dockAnimationPromise;
+    }
+
+    dockAnimationPromise = new Promise((resolve) => {
+        let finished = false;
+        const cleanup = () => {
+            if (finished) return;
+            finished = true;
+            centerStageEl.removeEventListener("transitionend", onTransitionEnd);
+            searchBarDocked = true;
+            dockAnimationPromise = null;
+            resolve();
+        };
+
+        const onTransitionEnd = (event) => {
+            if (event.target === centerStageEl && event.propertyName === "transform") {
+                cleanup();
+            }
+        };
+
+        centerStageEl.addEventListener("transitionend", onTransitionEnd);
+        centerStageEl.classList.add("center-stage-docked");
+        window.setTimeout(cleanup, 760);
+    });
+
+    return dockAnimationPromise;
+}
+
+function resetSearchBarDocking() {
+    /**
+     * Reset search shell docking state to initial centered position.
+     */
+    searchBarDocked = false;
+    dockAnimationPromise = null;
+    centerStageEl?.classList.remove("center-stage-docked");
+}
+
+function applyCursorPull() {
+    /**
+     * Apply a slight cursor attraction transform to each visible cloud word.
+     */
+    const words = cloudEl?.querySelectorAll(".word") || [];
+    if (!words.length) return;
+
+    words.forEach((word) => {
+        if (!cloudPointerLocal) {
+            word.style.setProperty("--pull-x", "0px");
+            word.style.setProperty("--pull-y", "0px");
+            return;
+        }
+
+        const wordX = Number.parseFloat(word.style.left || "0");
+        const wordY = Number.parseFloat(word.style.top || "0");
+        const dx = cloudPointerLocal.x - wordX;
+        const dy = cloudPointerLocal.y - wordY;
+        const distance = Math.hypot(dx, dy) || 1;
+        const influence = clamp(1 - distance / 430, 0, 1);
+        const pullStrength = 8.5 * influence;
+
+        word.style.setProperty("--pull-x", `${((dx / distance) * pullStrength).toFixed(2)}px`);
+        word.style.setProperty("--pull-y", `${((dy / distance) * pullStrength * 0.9).toFixed(2)}px`);
+    });
+}
 
 async function submitToBackend(query) {
     /**
@@ -789,7 +885,7 @@ function renderCloud() {
      /**
      * Render the tag cloud visualization based on the current tag weights and categories.
      */
-    if (searchCount === 0 || bubbleCleared) {
+    if (searchCount === 0 || bubbleCleared || !searchBarDocked) {
         cloudEl.style.opacity = "0";
         cloudEl.innerHTML = "";
         selectedCloudTagKey = null;
@@ -804,7 +900,19 @@ function renderCloud() {
         .slice(0, maxWords);
 
     const bounds = cloudEl.getBoundingClientRect();
-    const layout = buildWordLayout(entries, bounds.width, bounds.height);
+    const searchBounds = formEl?.getBoundingClientRect();
+    const segmentBounds = segmentPanelEl?.classList.contains("hidden")
+        ? null
+        : segmentPanelEl.getBoundingClientRect();
+
+    const safeTop = searchBounds
+        ? Math.min(bounds.height * 0.44, Math.max(106, searchBounds.bottom + 24))
+        : 112;
+    const safeBottom = segmentBounds
+        ? Math.max(safeTop + 140, Math.min(bounds.height - 24, segmentBounds.top - 18))
+        : bounds.height - 40;
+
+    const layout = buildWordLayout(entries, bounds.width, bounds.height, safeTop, safeBottom);
 
     cloudEl.innerHTML = "";
     layout.forEach((item) => {
@@ -819,6 +927,8 @@ function renderCloud() {
         wordEl.style.fontWeight = `${item.fontWeight}`;
         wordEl.style.opacity = `${item.opacity.toFixed(2)}`;
         wordEl.style.color = colorForCategory(item.category, item.tintAlpha);
+        wordEl.style.setProperty("--pull-x", "0px");
+        wordEl.style.setProperty("--pull-y", "0px");
 
         const actionsEl = document.createElement("span");
         actionsEl.className = "word-actions";
@@ -863,9 +973,10 @@ function renderCloud() {
     });
 
     applyCloudSelection();
+    applyCursorPull();
 }
 
-function buildWordLayout(entries, width, height) {
+function buildWordLayout(entries, width, height, safeTop, safeBottom) {
     /**
      * Build the layout for the word cloud by calculating positions, 
      * font sizes, and opacities for each tag based on their weights.
@@ -884,10 +995,6 @@ function buildWordLayout(entries, width, height) {
     const placed = [];
     const centerX = width / 2;
     const centerY = height / 2;
-    const verticalTopPadding = 72;
-    const verticalBottomPadding = 190;
-    const safeTop = verticalTopPadding;
-    const safeBottom = Math.max(verticalTopPadding + 80, height - verticalBottomPadding);
     const maxOuterRadius = Math.min(width * 0.47, (safeBottom - safeTop) * 0.48);
 
     entries.forEach(([tag, value], index) => {

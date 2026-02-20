@@ -34,7 +34,10 @@ body {
 
 .word {
   position: absolute;
-  transform: translate(-50%, -50%);
+  --pull-x: 0px;
+  --pull-y: 0px;
+  --word-scale: 1;
+  transform: translate(calc(-50% + var(--pull-x)), calc(-50% + var(--pull-y))) scale(var(--word-scale));
   white-space: nowrap;
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -42,17 +45,17 @@ body {
   user-select: none;
   letter-spacing: 0.15px;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
-  transition: opacity 220ms ease, transform 220ms ease, filter 220ms ease;
+  transition: opacity 220ms ease, transform 140ms linear, filter 220ms ease;
   cursor: pointer;
 }
 
 .word:hover {
-  transform: translate(-50%, -50%) scale(1.04);
+  --word-scale: 1.04;
 }
 
 .word.word-selected {
   opacity: 1 !important;
-  transform: translate(-50%, -50%) scale(1.08);
+  --word-scale: 1.08;
   filter: saturate(1.2);
 }
 
@@ -111,8 +114,15 @@ body {
   inset: 0;
   display: grid;
   place-items: center;
+  align-content: center;
   z-index: 2;
   pointer-events: none;
+  transform: translateY(0);
+  transition: transform 620ms cubic-bezier(0.2, 0.82, 0.2, 1);
+}
+
+.center-stage.center-stage-docked {
+  transform: translateY(-34vh);
 }
 
 .search-shell {
