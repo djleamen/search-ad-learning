@@ -97,7 +97,7 @@ function isAllowedBackendUrl(url) {
      */
     try {
         const parsed = new URL(url);
-        const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+        const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
         if (localHosts.has(parsed.hostname)) return true;
         return parsed.protocol === "https:";
     } catch {

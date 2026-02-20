@@ -127,7 +127,7 @@ def get_current_user_id(
             if not AUTH_JWT_SECRET:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="JWT authentication is not configured",
+                    detail="Authentication failed",
                 )
             claims = jwt.decode(token, AUTH_JWT_SECRET, algorithms=["HS256"])
         except jwt.InvalidTokenError as error:
