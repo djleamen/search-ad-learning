@@ -1,0 +1,80 @@
+name: Azure Deploy (azd)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'azure.yaml'
+      - 'infra/**'
+      - 'backend/**'
+      - 'frontend/**'
+      - 'index.html'
+      - 'app.js'
+      - 'styles.css'
+      - '.github/workflows/azure-deploy.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_ENV_NAME: dev
+  AZURE_LOCATION: eastus2
+  STATIC_WEB_APP_LOCATION: eastus2
+  POSTGRES_LOCATION: eastus2
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install azd
+        run: curl -fsSL https://aka.ms/install-azd.sh | bash
+
+      - name: Add azd to PATH
+        run: echo "$HOME/.azd/bin" >> "$GITHUB_PATH"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: azd auth login
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: azd auth login --client-id "$AZURE_CLIENT_ID" --federated-credential-provider github
+
+      - name: Configure azd environment
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
+        run: |
+          azd env new "$AZURE_ENV_NAME" --no-prompt || azd env select "$AZURE_ENV_NAME"
+          azd env set AZURE_LOCATION "$AZURE_LOCATION"
+          azd env set STATIC_WEB_APP_LOCATION "$STATIC_WEB_APP_LOCATION"
+          azd env set POSTGRES_LOCATION "$POSTGRES_LOCATION"
+          azd env set POSTGRES_ADMIN_PASSWORD "$POSTGRES_ADMIN_PASSWORD"
+          azd env set AUTH_JWT_SECRET "$AUTH_JWT_SECRET"
+
+      - name: Provision infrastructure
+        run: azd provision --no-prompt
+
+      - name: Deploy backend
+        run: azd deploy --no-prompt --service backend
+
+      - name: Deploy frontend (retry for SWA readiness)
+        run: |
+          for attempt in 1 2 3; do
+            azd deploy --no-prompt --service frontend && exit 0
+            echo "Frontend deploy attempt $attempt failed; waiting 30s before retry..."
+            sleep 30
+          done
+          echo "Frontend deployment failed after retries"
+          exit 1
