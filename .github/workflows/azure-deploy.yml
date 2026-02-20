@@ -124,15 +124,17 @@ jobs:
           postgresAdminPassword="$(trim_trailing_newlines "$postgresAdminPassword")"
           authJwtSecret="$(trim_trailing_newlines "$authJwtSecret")"
 
-          if printf '%s' "$postgresAdminPassword" | grep -q $'\n'; then
+          if [[ "$postgresAdminPassword" == *$'\n'* ]]; then
             echo "POSTGRES_ADMIN_PASSWORD contains an embedded newline; re-save it as a single-line secret."
             exit 1
           fi
 
-          if printf '%s' "$authJwtSecret" | grep -q $'\n'; then
+          if [[ "$authJwtSecret" == *$'\n'* ]]; then
             echo "AUTH_JWT_SECRET contains an embedded newline; re-save it as a single-line secret."
             exit 1
           fi
+
+          echo "Secret length checks: POSTGRES_ADMIN_PASSWORD=${#postgresAdminPassword}, AUTH_JWT_SECRET=${#authJwtSecret}"
 
           azd env set authJwtSecret "$authJwtSecret"
           azd env set postgresAdminPassword "$postgresAdminPassword"
