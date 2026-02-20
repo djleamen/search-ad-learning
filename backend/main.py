@@ -86,6 +86,15 @@ class FeedbackRequest(BaseModel):
     confidence: float = Field(default=1.0, ge=0.1, le=2.0)
 
 
+class ConversionClickRequest(BaseModel):
+    """
+    Request model for simulated conversion clicks from tag interactions.
+    """
+    tag: str = Field(min_length=1, max_length=200)
+    category: str
+    intensity: float = Field(default=1.0, ge=0.1, le=3.0)
+
+
 @app.get("/health")
 def health() -> Dict[str, str]:
     """
@@ -153,6 +162,27 @@ def clear_history() -> Dict[str, str]:
     return {"status": "cleared"}
 
 
+@app.post("/conversion/click")
+def conversion_click(payload: ConversionClickRequest) -> Dict[str, object]:
+    """
+    Track a simulated conversion click event from cloud-tag interaction.
+    :param payload: The click payload with tag, category, and intensity.
+    :return: Status and updated conversion affinity snapshot for the category.
+    """
+    if payload.category not in CATEGORY_LIST:
+        raise HTTPException(status_code=400, detail="Unknown category")
+
+    event_store.increment_conversion_affinity(
+        payload.category, payload.intensity)
+    affinities = event_store.get_conversion_affinity(CATEGORY_LIST)
+    return {
+        "status": "tracked",
+        "tag": payload.tag,
+        "category": payload.category,
+        "conversion_affinity": affinities.get(payload.category, 0.0),
+    }
+
+
 @app.post("/search")
 def search(payload: SearchRequest) -> Dict[str, object]:
     """
@@ -202,8 +232,30 @@ def search(payload: SearchRequest) -> Dict[str, object]:
                 fused[category] *= intent_boost
 
     total = sum(fused.values()) or 1.0
-    probabilities = {category: value /
-                     total for category, value in fused.items()}
+    click_probabilities = {category: value /
+                           total for category, value in fused.items()}
+
+    conversion_affinity = event_store.get_conversion_affinity(CATEGORY_LIST)
+    smoothed_conversion = {
+        category: conversion_affinity.get(category, 0.0) + 1.0
+        for category in CATEGORY_LIST
+    }
+    conversion_total = sum(smoothed_conversion.values()) or 1.0
+    conversion_probabilities = {
+        category: value / conversion_total
+        for category, value in smoothed_conversion.items()
+    }
+
+    reranked = {
+        category: click_probabilities[category] *
+        conversion_probabilities[category]
+        for category in CATEGORY_LIST
+    }
+    reranked_total = sum(reranked.values()) or 1.0
+    probabilities = {
+        category: value / reranked_total
+        for category, value in reranked.items()
+    }
 
     predicted_category = max(probabilities.items(),
                              key=lambda item: item[1])[0]
@@ -268,6 +320,17 @@ def feedback(payload: FeedbackRequest) -> Dict[str, object]:
 
     event_store.record_feedback(
         payload.query, payload.category, payload.confidence)
+
+    feedback_intents = classify_intent_probabilities(payload.query)
+    if (
+        payload.confidence >= 1.0
+        and feedback_intents.get("transactional", 0.0) >= TRANSACTIONAL_INTENT_THRESHOLD
+    ):
+        event_store.increment_conversion_affinity(
+            payload.category,
+            amount=min(1.5, payload.confidence * 0.55),
+        )
+
     model_service.online_update(
         payload.query, payload.category, sample_weight=payload.confidence)
 

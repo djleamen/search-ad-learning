@@ -92,11 +92,18 @@ class EventStore:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     vector_json TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS user_conversion_affinity (
+                    category TEXT PRIMARY KEY,
+                    score REAL NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_search_events_schema(connection)
             self._ensure_category_totals_schema(connection)
             self._ensure_tag_totals_schema(connection)
+            self._ensure_user_conversion_affinity_schema(connection)
             connection.commit()
 
     def _ensure_tag_totals_schema(self, connection: sqlite3.Connection) -> None:
@@ -105,12 +112,14 @@ class EventStore:
         :param connection: Active SQLite connection.
         """
         rows = connection.execute("PRAGMA table_info(tag_totals)").fetchall()
-        primary_key_columns = [row["name"] for row in rows if int(row["pk"] or 0) > 0]
+        primary_key_columns = [row["name"]
+                               for row in rows if int(row["pk"] or 0) > 0]
 
         if set(primary_key_columns) == {"tag", "category"}:
             return
 
-        connection.execute("ALTER TABLE tag_totals RENAME TO tag_totals_legacy")
+        connection.execute(
+            "ALTER TABLE tag_totals RENAME TO tag_totals_legacy")
         connection.execute(
             """
             CREATE TABLE tag_totals (
@@ -154,6 +163,34 @@ class EventStore:
             SET intent_json = '{}'
             WHERE intent_json IS NULL OR intent_json = ''
             """
+        )
+
+    def _ensure_user_conversion_affinity_schema(self, connection: sqlite3.Connection) -> None:
+        """
+        Ensure user_conversion_affinity has updated_at column.
+        :param connection: Active SQLite connection.
+        """
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(user_conversion_affinity)").fetchall()
+        }
+        if "updated_at" in columns:
+            return
+
+        connection.execute(
+            """
+            ALTER TABLE user_conversion_affinity
+            ADD COLUMN updated_at TEXT
+            """
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            """
+            UPDATE user_conversion_affinity
+            SET updated_at = ?
+            WHERE updated_at IS NULL OR updated_at = ''
+            """,
+            (now,),
         )
 
     def _ensure_category_totals_schema(self, connection: sqlite3.Connection) -> None:
@@ -274,9 +311,59 @@ class EventStore:
                     DELETE FROM category_totals;
                     DELETE FROM tag_totals;
                     DELETE FROM user_embedding;
+                    DELETE FROM user_conversion_affinity;
                     """
                 )
                 connection.commit()
+
+    def increment_conversion_affinity(self, category: str, amount: float) -> None:
+        """
+        Increase conversion propensity score for a category.
+        :param category: Category to update.
+        :param amount: Positive increment amount.
+        """
+        increment = max(0.0, float(amount))
+        if increment <= 0.0:
+            return
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO user_conversion_affinity (category, score, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(category) DO UPDATE SET
+                        score = user_conversion_affinity.score + excluded.score,
+                        updated_at = excluded.updated_at
+                    """,
+                    (category, increment, timestamp),
+                )
+                connection.commit()
+
+    def get_conversion_affinity(self, categories: Sequence[str]) -> Dict[str, float]:
+        """
+        Get per-category conversion propensity scores.
+        :param categories: Category keys to include.
+        :return: Mapping of category to non-negative score.
+        """
+        requested = [str(category) for category in categories]
+        if not requested:
+            return {}
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT category, score
+                FROM user_conversion_affinity
+                """
+            ).fetchall()
+
+        loaded = {
+            str(row["category"]): max(0.0, float(row["score"]))
+            for row in rows
+        }
+        return {category: loaded.get(category, 0.0) for category in requested}
 
     def get_user_embedding(self, dimensions: int) -> List[float]:
         """
@@ -354,11 +441,13 @@ class EventStore:
                 updated_at = datetime.fromisoformat(updated_raw)
                 if updated_at.tzinfo is None:
                     updated_at = updated_at.replace(tzinfo=timezone.utc)
-                age_days = max(0.0, (now - updated_at).total_seconds() / 86400.0)
+                age_days = max(
+                    0.0, (now - updated_at).total_seconds() / 86400.0)
             except (TypeError, ValueError):
                 age_days = 0.0
 
-            adjusted_score = float(row["score"]) * math.exp(-decay_lambda * age_days)
+            adjusted_score = float(row["score"]) * \
+                math.exp(-decay_lambda * age_days)
             decayed_rows.append(
                 {
                     "category": row["category"],

@@ -45,7 +45,7 @@ class TaxonomyModelService:
             learning_rate_init=1e-3,
             random_state=42,
             max_iter=350,
-            early_stopping=True,
+            early_stopping=False,
             n_iter_no_change=10,
             tol=1e-4,
         )
@@ -71,6 +71,7 @@ class TaxonomyModelService:
                     and isinstance(loaded_categories, list)
                     and loaded_embedding_model_name == self.embedding_model_name
                 ):
+                    loaded_classifier.early_stopping = False
                     self.classifier = loaded_classifier
                     self.categories = [str(category)
                                        for category in loaded_categories]

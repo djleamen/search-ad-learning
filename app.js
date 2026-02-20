@@ -99,6 +99,8 @@ let searchCount = 0;
 let backendOnline = null;
 let latestPrediction = null;
 let bubbleCleared = false;
+let selectedCloudTagKey = null;
+const conversionNotifications = [];
 
 const cloudEl = document.getElementById("cloud");
 const formEl = document.getElementById("searchForm");
@@ -118,9 +120,21 @@ const feedbackSubmitEl = document.getElementById("feedbackSubmit");
 const feedbackStatusEl = document.getElementById("feedbackStatus");
 const clearBubbleBtnEl = document.getElementById("clearBubbleBtn");
 
+function logStatus(message) {
+    /**
+     * Log status updates without rendering them in the center UI.
+     * @param {string} message - Status message.
+     */
+    if (typeof message === "string" && message.trim()) {
+        console.info(`[status] ${message}`);
+    }
+}
+
 const measureCanvas = document.createElement("canvas");
 const measureCtx = measureCanvas.getContext("2d");
 const localHistory = [];
+
+statusLineEl?.classList.add("hidden");
 
 bootstrapTrainingData();
 renderSegments();
@@ -145,7 +159,7 @@ clearBubbleBtnEl?.addEventListener("click", async () => {
     
     const erased = await eraseHistory();
     if (!erased) {
-        statusLineEl.textContent = "Could not erase history. Make sure backend is running.";
+        logStatus("Could not erase history. Make sure backend is running.");
         return;
     }
 
@@ -160,7 +174,7 @@ clearBubbleBtnEl?.addEventListener("click", async () => {
     renderHistory();
     renderFeedbackPanel();
     renderSegments();
-    statusLineEl.textContent = "History erased and bubble cleared.";
+    logStatus("History erased and bubble cleared.");
 });
 
 formEl.addEventListener("submit", async (event) => {
@@ -463,6 +477,68 @@ async function eraseHistory() {
     }
 }
 
+async function trackConversionClick(tag, category) {
+    /**
+     * Track a simulated conversion click event for a tag.
+     * @param {string} tag - The clicked tag text.
+     * @param {string} category - The category associated with the tag.
+     * @returns {Promise<boolean>} - True when backend accepts the click event.
+     */
+    if (backendOnline === false) return false;
+
+    try {
+        const response = await fetch(`${backendUrl}/conversion/click`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tag, category, intensity: 1.0 })
+        });
+
+        if (!response.ok) {
+            backendOnline = false;
+            return false;
+        }
+
+        backendOnline = true;
+        return true;
+    } catch {
+        backendOnline = false;
+        return false;
+    }
+}
+
+function applyCloudSelection() {
+    /**
+     * Apply selected/faded visual states to cloud tags.
+     */
+    const words = cloudEl.querySelectorAll(".word");
+    words.forEach((word) => {
+        const wordKey = `${word.dataset.tag}::${word.dataset.category}`;
+        const isSelected = selectedCloudTagKey && wordKey === selectedCloudTagKey;
+        word.classList.toggle("word-selected", Boolean(isSelected));
+        word.classList.toggle("word-faded", Boolean(selectedCloudTagKey && !isSelected));
+    });
+}
+
+function addConversionNotification(message) {
+    /**
+     * Add a conversion-click notification to the side history panel.
+     * @param {string} message - Notification message text.
+     */
+    conversionNotifications.unshift({
+        message,
+        created_at: new Date().toISOString(),
+    });
+
+    if (conversionNotifications.length > 12) {
+        conversionNotifications.pop();
+    }
+
+    historyPanelEl?.classList.remove("hidden");
+    logStatus(message);
+
+    renderHistory();
+}
+
 function resetCategoryScores() {
     /**
      * Reset the category scores to their initial default values.
@@ -501,7 +577,27 @@ function renderHistory() {
      */
     if (!historyPanelEl || !historyListEl) return;
 
-    if (!localHistory.length) {
+    const toTimestamp = (value) => {
+        const parsed = Date.parse(value || "");
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const timeline = [
+        ...conversionNotifications.map((item) => ({
+            type: "conversion",
+            created_at: item.created_at,
+            item,
+        })),
+        ...localHistory.map((item) => ({
+            type: "query",
+            created_at: item.created_at,
+            item,
+        })),
+    ]
+        .sort((a, b) => toTimestamp(b.created_at) - toTimestamp(a.created_at))
+        .slice(0, 17);
+
+    if (!timeline.length) {
         historyPanelEl.classList.add("hidden");
         historyListEl.innerHTML = "";
         return;
@@ -510,7 +606,25 @@ function renderHistory() {
     historyPanelEl.classList.remove("hidden");
     historyListEl.innerHTML = "";
 
-    localHistory.slice(0, 12).forEach((item) => {
+    timeline.forEach((entry) => {
+        if (entry.type === "conversion") {
+            const wrapper = document.createElement("div");
+            wrapper.className = "history-item history-notification";
+
+            const title = document.createElement("div");
+            title.className = "history-prediction";
+            title.textContent = "Conversion signal";
+
+            const body = document.createElement("div");
+            body.className = "history-query";
+            body.textContent = entry.item.message;
+
+            wrapper.append(title, body);
+            historyListEl.appendChild(wrapper);
+            return;
+        }
+
+        const item = entry.item;
         const wrapper = document.createElement("div");
         wrapper.className = "history-item";
 
@@ -525,18 +639,18 @@ function renderHistory() {
         const top = document.createElement("div");
         top.className = "history-topline";
         top.textContent = (item.top_categories || [])
-        .map((entry) => `${entry.category} ${Math.round((entry.probability || 0) * 100)}%`)
-        .join(" • ");
+            .map((topEntry) => `${topEntry.category} ${Math.round((topEntry.probability || 0) * 100)}%`)
+            .join(" • ");
 
         const feedback = document.createElement("div");
         feedback.className = "history-feedback";
         if (item.feedback?.category) {
-        const isCorrection = item.feedback.category !== item.predicted_category;
-        feedback.textContent = isCorrection
-            ? `Human feedback: corrected to ${item.feedback.category}`
-            : `Human feedback: confirmed ${item.feedback.category}`;
+            const isCorrection = item.feedback.category !== item.predicted_category;
+            feedback.textContent = isCorrection
+                ? `Human feedback: corrected to ${item.feedback.category}`
+                : `Human feedback: confirmed ${item.feedback.category}`;
         } else {
-        feedback.textContent = "Human feedback: none";
+            feedback.textContent = "Human feedback: none";
         }
 
         wrapper.append(query, prediction, top, feedback);
@@ -678,6 +792,7 @@ function renderCloud() {
     if (searchCount === 0 || bubbleCleared) {
         cloudEl.style.opacity = "0";
         cloudEl.innerHTML = "";
+        selectedCloudTagKey = null;
         return;
     }
 
@@ -695,6 +810,8 @@ function renderCloud() {
     layout.forEach((item) => {
         const wordEl = document.createElement("span");
         wordEl.className = "word";
+        wordEl.dataset.tag = item.tag;
+        wordEl.dataset.category = item.category;
         wordEl.textContent = item.tag;
         wordEl.style.left = `${item.centerX}px`;
         wordEl.style.top = `${item.centerY}px`;
@@ -702,8 +819,50 @@ function renderCloud() {
         wordEl.style.fontWeight = `${item.fontWeight}`;
         wordEl.style.opacity = `${item.opacity.toFixed(2)}`;
         wordEl.style.color = colorForCategory(item.category, item.tintAlpha);
+
+        const actionsEl = document.createElement("span");
+        actionsEl.className = "word-actions";
+        actionsEl.addEventListener("click", (event) => {
+            event.stopPropagation();
+        });
+
+        const confirmEl = document.createElement("button");
+        confirmEl.type = "button";
+        confirmEl.className = "word-action word-action-confirm";
+        confirmEl.setAttribute("aria-label", `Confirm conversion for ${item.tag}`);
+        confirmEl.textContent = "✓";
+        confirmEl.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            const tracked = await trackConversionClick(item.tag, item.category);
+            const scope = tracked ? "" : " (local only)";
+            addConversionNotification(`Confirmed conversion on ${item.tag} (${item.category})${scope}.`);
+            selectedCloudTagKey = null;
+            applyCloudSelection();
+        });
+
+        const dismissEl = document.createElement("button");
+        dismissEl.type = "button";
+        dismissEl.className = "word-action word-action-dismiss";
+        dismissEl.setAttribute("aria-label", `Dismiss conversion for ${item.tag}`);
+        dismissEl.textContent = "✕";
+        dismissEl.addEventListener("click", (event) => {
+            event.stopPropagation();
+            selectedCloudTagKey = null;
+            applyCloudSelection();
+        });
+
+        actionsEl.append(confirmEl, dismissEl);
+        wordEl.appendChild(actionsEl);
+
+        wordEl.addEventListener("click", async () => {
+            const clickedKey = `${item.tag}::${item.category}`;
+            selectedCloudTagKey = selectedCloudTagKey === clickedKey ? null : clickedKey;
+            applyCloudSelection();
+        });
         cloudEl.appendChild(wordEl);
     });
+
+    applyCloudSelection();
 }
 
 function buildWordLayout(entries, width, height) {
@@ -741,7 +900,7 @@ function buildWordLayout(entries, width, height) {
          * @param {number} index - The index of the tag in the sorted entries array.
          */
         const normalized = (value - lowValue) / spread;
-        const fontSize = 10 + normalized * 40;
+        const fontSize = 13 + normalized * 37;
         const fontWeight = Math.round(380 + normalized * 450);
 
         measureCtx.font = `${fontWeight} ${fontSize}px Inter, system-ui, sans-serif`;
@@ -790,8 +949,8 @@ function buildWordLayout(entries, width, height) {
         centerY: centerPosition.y,
         fontSize,
         fontWeight,
-        opacity: 0.3 + normalized * 0.7,
-        tintAlpha: 0.2 + normalized * 0.72
+        opacity: 0.46 + normalized * 0.54,
+        tintAlpha: 0.34 + normalized * 0.62
         });
     });
 
@@ -882,9 +1041,9 @@ function updateStatus(probabilities, query, fromBackend) {
     const [topCategory, topProbability] = sorted[0] || ["/Unknown", 0];
 
     if (fromBackend) {
-        statusLineEl.textContent = `Backend model learned from "${query}" → strongest segment: ${topCategory} (${Math.round(topProbability * 100)}%)`;
+        logStatus(`Backend model learned from "${query}" → strongest segment: ${topCategory} (${Math.round(topProbability * 100)}%)`);
     } else {
-        statusLineEl.textContent = `Local model learned from "${query}" → strongest segment: ${topCategory} (${Math.round(topProbability * 100)}%)`;
+        logStatus(`Local model learned from "${query}" → strongest segment: ${topCategory} (${Math.round(topProbability * 100)}%)`);
     }
     }
 
