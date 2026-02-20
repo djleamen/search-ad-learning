@@ -68,10 +68,16 @@ auth_scheme = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="Search Taxonomy ML Backend", version="1.0.0")
 
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"],
+    allow_credentials=bool(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -118,10 +124,12 @@ def get_current_user_id(
 
         token = credentials.credentials
         try:
-            if AUTH_JWT_SECRET:
-                claims = jwt.decode(token, AUTH_JWT_SECRET, algorithms=["HS256"])
-            else:
-                claims = jwt.decode(token, options={"verify_signature": False})
+            if not AUTH_JWT_SECRET:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Authentication failed",
+                )
+            claims = jwt.decode(token, AUTH_JWT_SECRET, algorithms=["HS256"])
         except jwt.InvalidTokenError as error:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -432,7 +440,7 @@ def feedback(
 
 
 @app.post("/retrain")
-def retrain() -> Dict[str, object]:
+def retrain(user_id: str = Depends(get_current_user_id)) -> Dict[str, object]:
     """
     Retrain the model using the initial training data and feedback examples.
     :return: A dictionary containing the status and the number of categories.
