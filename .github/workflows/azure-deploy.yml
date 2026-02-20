@@ -54,10 +54,16 @@ jobs:
 
       - name: Configure azd environment
         env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
         run: |
           azd env new "$AZURE_ENV_NAME" --no-prompt || azd env select "$AZURE_ENV_NAME"
+          azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
+          azd env set AZURE_TENANT_ID "$AZURE_TENANT_ID"
+          azd env set AZURE_CLIENT_ID "$AZURE_CLIENT_ID"
           azd env set AZURE_LOCATION "$AZURE_LOCATION"
           azd env set STATIC_WEB_APP_LOCATION "$STATIC_WEB_APP_LOCATION"
           azd env set POSTGRES_LOCATION "$POSTGRES_LOCATION"
