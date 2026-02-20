@@ -127,8 +127,10 @@ def embedding(limit: int = Query(default=6, ge=1, le=20)) -> Dict[str, object]:
     """
     vector = event_store.get_user_embedding(
         dimensions=model_service.embedding_dimensions)
-    probabilities = model_service.category_probabilities_from_user_embedding(vector)
-    ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
+    probabilities = model_service.category_probabilities_from_user_embedding(
+        vector)
+    ranked = sorted(probabilities.items(),
+                    key=lambda item: item[1], reverse=True)
     norm = sum(value * value for value in vector) ** 0.5
 
     return {
@@ -224,7 +226,8 @@ def search(payload: SearchRequest) -> Dict[str, object]:
 
     online_sample_weight = 0.35
     if transactional_intent_score >= TRANSACTIONAL_INTENT_THRESHOLD:
-        online_sample_weight = min(0.9, online_sample_weight + 0.25 + transactional_intent_score * 0.2)
+        online_sample_weight = min(
+            0.9, online_sample_weight + 0.25 + transactional_intent_score * 0.2)
 
     if predicted_score >= 0.58 and (model_top == lexical_top or lexical_peak < 0.28 or embedding_top == predicted_category):
         model_service.online_update(

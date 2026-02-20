@@ -3,3 +3,4 @@ uvicorn[standard]==0.34.0
 scikit-learn==1.6.1
 numpy==2.0.2
 joblib==1.4.2
+sentence-transformers==3.4.1

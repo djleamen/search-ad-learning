@@ -9,8 +9,8 @@ from typing import Dict, List, Sequence
 
 import joblib
 import numpy as np
-from sklearn.feature_extraction.text import HashingVectorizer
-from sklearn.linear_model import SGDClassifier
+from sentence_transformers import SentenceTransformer
+from sklearn.neural_network import MLPClassifier
 
 from .taxonomy_data import CATEGORY_LIST, TAXONOMY, build_seed_corpus
 
@@ -21,6 +21,7 @@ class TaxonomyModelService:
     Uses a stochastic gradient descent classifier with log loss and 
     a hashing vectorizer for text features. 
     """
+
     def __init__(self, artifact_dir: Path) -> None:
         """
         Initialize the TaxonomyModelService.
@@ -31,28 +32,22 @@ class TaxonomyModelService:
         self.artifact_file = self.artifact_dir / "taxonomy_model.joblib"
 
         self.categories: List[str] = list(CATEGORY_LIST)
-        self.vectorizer = HashingVectorizer(
-            n_features=2**18,
-            alternate_sign=False,
-            ngram_range=(1, 2),
-            lowercase=True,
-            norm="l2",
-        )
-        self.embedding_dimensions = 64
-        self.embedding_vectorizer = HashingVectorizer(
-            n_features=self.embedding_dimensions,
-            alternate_sign=False,
-            ngram_range=(1, 2),
-            lowercase=True,
-            norm="l2",
-        )
-        self.classifier = SGDClassifier(
-            loss="log_loss",
-            alpha=1e-6,
-            penalty="l2",
+        self.embedding_model_name = "all-MiniLM-L6-v2"
+        self.embedding_model = SentenceTransformer(self.embedding_model_name)
+        self.embedding_dimensions = int(
+            self.embedding_model.get_sentence_embedding_dimension())
+
+        self.classifier = MLPClassifier(
+            hidden_layer_sizes=(192, 64),
+            activation="relu",
+            solver="adam",
+            alpha=1e-4,
+            learning_rate_init=1e-3,
             random_state=42,
-            max_iter=12,
-            tol=1e-3,
+            max_iter=350,
+            early_stopping=True,
+            n_iter_no_change=10,
+            tol=1e-4,
         )
         self.category_prototypes = self._build_category_prototypes()
         self.is_trained = False
@@ -64,11 +59,26 @@ class TaxonomyModelService:
         Load the model from the artifact file if it exists, otherwise train the initial model.
         """
         if self.artifact_file.exists():
-            payload = joblib.load(self.artifact_file)
-            self.classifier = payload["classifier"]
-            self.categories = payload["categories"]
-            self.is_trained = True
-            return
+            try:
+                payload = joblib.load(self.artifact_file)
+                loaded_classifier = payload.get("classifier")
+                loaded_categories = payload.get("categories")
+                loaded_embedding_model_name = payload.get(
+                    "embedding_model_name")
+
+                if (
+                    isinstance(loaded_classifier, MLPClassifier)
+                    and isinstance(loaded_categories, list)
+                    and loaded_embedding_model_name == self.embedding_model_name
+                ):
+                    self.classifier = loaded_classifier
+                    self.categories = [str(category)
+                                       for category in loaded_categories]
+                    self.category_prototypes = self._build_category_prototypes()
+                    self.is_trained = True
+                    return
+            except (OSError, ValueError, TypeError, KeyError):
+                pass
 
         self.train_initial_model()
 
@@ -79,8 +89,26 @@ class TaxonomyModelService:
         payload = {
             "classifier": self.classifier,
             "categories": self.categories,
+            "embedding_model_name": self.embedding_model_name,
         }
         joblib.dump(payload, self.artifact_file)
+
+    def _encode_texts(self, texts: Sequence[str]) -> np.ndarray:
+        """
+        Encode text samples using the sentence embedding model.
+        :param texts: Input text samples.
+        :return: 2D embedding matrix.
+        """
+        if not texts:
+            return np.zeros((0, self.embedding_dimensions), dtype=np.float64)
+
+        vectors = self.embedding_model.encode(
+            list(texts),
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        return np.asarray(vectors, dtype=np.float64)
 
     def train_initial_model(self) -> None:
         """
@@ -90,11 +118,8 @@ class TaxonomyModelService:
         texts = [text for text, _ in samples]
         labels = np.array([label for _, label in samples])
 
-        x_matrix = self.vectorizer.transform(texts)
-        classes = np.array(self.categories)
-
-        for _ in range(4):
-            self.classifier.partial_fit(x_matrix, labels, classes=classes)
+        x_matrix = self._encode_texts(texts)
+        self.classifier.fit(x_matrix, labels)
 
         self.is_trained = True
         self.save()
@@ -116,8 +141,7 @@ class TaxonomyModelService:
         :param query: Query text.
         :return: Dense normalized embedding.
         """
-        sparse = self.embedding_vectorizer.transform([query])
-        dense = np.asarray(sparse.todense(), dtype=np.float64)[0]
+        dense = self._encode_texts([query])[0]
         return self._normalize_vector(dense)
 
     def _build_category_prototypes(self) -> Dict[str, np.ndarray]:
@@ -125,7 +149,8 @@ class TaxonomyModelService:
         Build normalized prototype vectors for each category.
         :return: Mapping of category to prototype vector.
         """
-        grouped_texts: Dict[str, List[str]] = {category: [] for category in self.categories}
+        grouped_texts: Dict[str, List[str]] = {
+            category: [] for category in self.categories}
 
         for category, payload in TAXONOMY.items():
             grouped_texts.setdefault(category, [])
@@ -140,11 +165,11 @@ class TaxonomyModelService:
         for category in self.categories:
             texts = grouped_texts.get(category, [])
             if not texts:
-                prototypes[category] = np.zeros(self.embedding_dimensions, dtype=np.float64)
+                prototypes[category] = np.zeros(
+                    self.embedding_dimensions, dtype=np.float64)
                 continue
 
-            sparse = self.embedding_vectorizer.transform(texts)
-            dense = np.asarray(sparse.todense(), dtype=np.float64)
+            dense = self._encode_texts(texts)
             mean_vector = dense.mean(axis=0)
             prototypes[category] = self._normalize_vector(mean_vector)
 
@@ -159,10 +184,11 @@ class TaxonomyModelService:
         if not self.is_trained:
             self.train_initial_model()
 
-        x_matrix = self.vectorizer.transform([query])
+        x_matrix = self._encode_texts([query])
         probabilities = self.classifier.predict_proba(x_matrix)[0]
 
-        paired = sorted(zip(self.categories, probabilities), key=lambda item: item[1], reverse=True)
+        paired = sorted(zip(self.categories, probabilities),
+                        key=lambda item: item[1], reverse=True)
         total = sum(value for _, value in paired) or 1.0
         return {category: float(value / total) for category, value in paired}
 
@@ -176,12 +202,20 @@ class TaxonomyModelService:
         if category not in self.categories:
             return
 
-        x_matrix = self.vectorizer.transform([query])
-        y = np.array([category])
-        classes = np.array(self.categories)
-        weights = np.array([sample_weight])
+        if not self.is_trained:
+            self.train_initial_model()
 
-        self.classifier.partial_fit(x_matrix, y, classes=classes, sample_weight=weights)
+        x_base = self._encode_texts([query])
+        repeat_count = max(1, int(round(max(0.1, sample_weight) * 4)))
+        x_matrix = np.repeat(x_base, repeat_count, axis=0)
+        y = np.array([category] * repeat_count)
+
+        if hasattr(self.classifier, "classes_"):
+            self.classifier.partial_fit(x_matrix, y)
+        else:
+            self.classifier.partial_fit(
+                x_matrix, y, classes=np.array(self.categories))
+
         self.save()
 
     def update_user_embedding(

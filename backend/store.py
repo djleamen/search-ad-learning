@@ -82,9 +82,10 @@ class EventStore:
                 );
 
                 CREATE TABLE IF NOT EXISTS tag_totals (
-                    tag TEXT PRIMARY KEY,
+                    tag TEXT NOT NULL,
                     category TEXT NOT NULL,
-                    score REAL NOT NULL DEFAULT 0
+                    score REAL NOT NULL DEFAULT 0,
+                    PRIMARY KEY (tag, category)
                 );
 
                 CREATE TABLE IF NOT EXISTS user_embedding (
@@ -95,7 +96,39 @@ class EventStore:
             )
             self._ensure_search_events_schema(connection)
             self._ensure_category_totals_schema(connection)
+            self._ensure_tag_totals_schema(connection)
             connection.commit()
+
+    def _ensure_tag_totals_schema(self, connection: sqlite3.Connection) -> None:
+        """
+        Ensure tag_totals uses a composite primary key (tag, category).
+        :param connection: Active SQLite connection.
+        """
+        rows = connection.execute("PRAGMA table_info(tag_totals)").fetchall()
+        primary_key_columns = [row["name"] for row in rows if int(row["pk"] or 0) > 0]
+
+        if set(primary_key_columns) == {"tag", "category"}:
+            return
+
+        connection.execute("ALTER TABLE tag_totals RENAME TO tag_totals_legacy")
+        connection.execute(
+            """
+            CREATE TABLE tag_totals (
+                tag TEXT NOT NULL,
+                category TEXT NOT NULL,
+                score REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (tag, category)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO tag_totals (tag, category, score)
+            SELECT tag, category, score
+            FROM tag_totals_legacy
+            """
+        )
+        connection.execute("DROP TABLE tag_totals_legacy")
 
     def _ensure_search_events_schema(self, connection: sqlite3.Connection) -> None:
         """
@@ -201,9 +234,8 @@ class EventStore:
                         """
                         INSERT INTO tag_totals (tag, category, score)
                         VALUES (?, ?, ?)
-                        ON CONFLICT(tag) DO UPDATE SET
-                            score = tag_totals.score + excluded.score,
-                            category = excluded.category
+                        ON CONFLICT(tag, category) DO UPDATE SET
+                            score = tag_totals.score + excluded.score
                         """,
                         (tag, category, weight),
                     )
