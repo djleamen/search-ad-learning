@@ -5,6 +5,7 @@ Event Store for recording search events, feedback, and maintaining category/tag 
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +62,8 @@ class EventStore:
 
                 CREATE TABLE IF NOT EXISTS category_totals (
                     category TEXT PRIMARY KEY,
-                    score REAL NOT NULL DEFAULT 0
+                    score REAL NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS tag_totals (
@@ -76,7 +78,36 @@ class EventStore:
                 );
                 """
             )
+            self._ensure_category_totals_schema(connection)
             connection.commit()
+
+    def _ensure_category_totals_schema(self, connection: sqlite3.Connection) -> None:
+        """
+        Ensure category_totals has the updated_at column for recency decay support.
+        :param connection: Active SQLite connection.
+        """
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(category_totals)").fetchall()
+        }
+        if "updated_at" in columns:
+            return
+
+        connection.execute(
+            """
+            ALTER TABLE category_totals
+            ADD COLUMN updated_at TEXT
+            """
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            """
+            UPDATE category_totals
+            SET updated_at = ?
+            WHERE updated_at IS NULL OR updated_at = ''
+            """,
+            (now,),
+        )
 
     def record_search(
         self,
@@ -108,11 +139,13 @@ class EventStore:
                 for category, score in probabilities.items():
                     connection.execute(
                         """
-                        INSERT INTO category_totals (category, score)
-                        VALUES (?, ?)
-                        ON CONFLICT(category) DO UPDATE SET score = category_totals.score + excluded.score
+                        INSERT INTO category_totals (category, score, updated_at)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(category) DO UPDATE SET
+                            score = category_totals.score + excluded.score,
+                            updated_at = excluded.updated_at
                         """,
-                        (category, score),
+                        (category, score, timestamp),
                     )
 
                 for tag, category, weight in tag_updates:
@@ -224,7 +257,7 @@ class EventStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT category, score
+                SELECT category, score, updated_at
                 FROM category_totals
                 ORDER BY score DESC
                 LIMIT ?
@@ -232,14 +265,35 @@ class EventStore:
                 (limit,),
             ).fetchall()
 
-        total = sum(row["score"] for row in rows) or 1.0
+        now = datetime.now(timezone.utc)
+        decay_lambda = 0.08
+        decayed_rows = []
+        for row in rows:
+            updated_raw = row["updated_at"]
+            try:
+                updated_at = datetime.fromisoformat(updated_raw)
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=timezone.utc)
+                age_days = max(0.0, (now - updated_at).total_seconds() / 86400.0)
+            except (TypeError, ValueError):
+                age_days = 0.0
+
+            adjusted_score = float(row["score"]) * math.exp(-decay_lambda * age_days)
+            decayed_rows.append(
+                {
+                    "category": row["category"],
+                    "adjusted_score": adjusted_score,
+                }
+            )
+
+        total = sum(item["adjusted_score"] for item in decayed_rows) or 1.0
         return [
             {
-                "category": row["category"],
-                "score": float(row["score"]),
-                "probability": float(row["score"] / total),
+                "category": item["category"],
+                "score": float(item["adjusted_score"]),
+                "probability": float(item["adjusted_score"] / total),
             }
-            for row in rows
+            for item in decayed_rows
         ]
 
     def get_cloud_words(self, limit: int = 180) -> List[Dict[str, float]]:
