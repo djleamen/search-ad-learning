@@ -40,49 +40,9 @@ backed by a Python machine-learning taxonomy service.
   - `model_service.py` model training/inference/online updates
   - `store.py` persistent event and aggregate store
 
-## Run frontend only
+## Try it out
+Visit the site [here](https://proud-pond-0b23fea0f.4.azurestaticapps.net).
 
-```bash
-python3 -m http.server 8000
-```
-
-Open `http://localhost:8000`.
-
-## Run backend + frontend
-
-### 1) Install backend dependencies
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r backend/requirements.txt
-```
-
-### 2) Set environment variables
-
-```bash
-export DATABASE_URL="postgresql+psycopg://<user>:<password>@<host>:5432/<db>"
-
-# Optional: verify JWT bearer tokens signed with HS256.
-# If unset, backend accepts X-User-Id header (used by frontend in local/dev).
-export AUTH_JWT_SECRET="change-me"
-```
-
-### 3) Start backend API
-
-```bash
-uvicorn backend.main:app --host 127.0.0.1 --port 8001 --reload
-```
-
-### 4) Start frontend
-
-```bash
-python3 -m http.server 8000
-```
-
-Open `http://localhost:8000`.
-
-The frontend will call `http://127.0.0.1:8001/search` automatically.
 
 ## Azure deployment target
 
