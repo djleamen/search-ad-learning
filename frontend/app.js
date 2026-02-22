@@ -170,7 +170,18 @@ function getOrCreateUserId() {
         return existing;
     }
 
-    const generated = (window.crypto?.randomUUID?.() || `demo-${Date.now()}-${Math.floor(Math.random() * 1e6)}`).toString();
+    // Generate a cryptographically secure random ID. Prefer randomUUID if available,
+    // otherwise fall back to getRandomValues-based generation.
+    const generated = (
+        window.crypto?.randomUUID?.() ||
+        (function () {
+            const array = new Uint32Array(4);
+            window.crypto.getRandomValues(array);
+            // Convert to hex segments for a stable, opaque ID string.
+            const hex = Array.from(array, n => n.toString(16).padStart(8, "0")).join("-");
+            return `demo-${hex}`;
+        })()
+    ).toString();
     window.localStorage.setItem(storageKey, generated);
     return generated;
 }
