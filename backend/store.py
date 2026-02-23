@@ -23,6 +23,14 @@ class DatabaseStore:
     """
 
     def __init__(self, database_url: str, db_path: Path | None = None) -> None:
+        """
+        Initialize the DatabaseStore and create the database schema.
+
+        :param database_url: SQLAlchemy-compatible database connection URL.
+        :param db_path: Optional filesystem path used to auto-build a sqlite URL
+            and to ensure the parent directory exists before connecting.
+        :raises ValueError: If no database URL can be resolved.
+        """
         if not database_url and db_path is not None:
             database_url = f"sqlite:///{db_path}"
         if not database_url:
@@ -37,6 +45,14 @@ class DatabaseStore:
         self._init_db()
 
     def _load_segment_decay_lambda(self) -> float:
+        """
+        Load the segment decay lambda from the environment.
+
+        Reads the ``SEGMENT_DECAY_LAMBDA`` environment variable and returns it
+        as a non-negative float, falling back to ``0.08`` on parse errors.
+
+        :return: The segment decay lambda value.
+        """
         raw_value = os.getenv("SEGMENT_DECAY_LAMBDA", "0.08")
         try:
             value = float(raw_value)
@@ -45,6 +61,10 @@ class DatabaseStore:
             return 0.08
 
     def _init_db(self) -> None:
+        """
+        Execute the DDL statements that create all required tables if they do
+        not already exist.
+        """
         schema_statements = [
             """
             CREATE TABLE IF NOT EXISTS global_feedback_events (
@@ -137,9 +157,19 @@ class UserEventStore:
     """
 
     def __init__(self, db: DatabaseStore) -> None:
+        """
+        Initialize the UserEventStore.
+
+        :param db: Shared :class:`DatabaseStore` providing the engine and write lock.
+        """
         self.db = db
 
     def _now(self) -> str:
+        """
+        Return the current UTC timestamp as an ISO-8601 string.
+
+        :return: Current UTC time in ISO-8601 format.
+        """
         return datetime.now(timezone.utc).isoformat()
 
     def record_search(
@@ -151,6 +181,17 @@ class UserEventStore:
         intent_probabilities: Dict[str, float],
         tag_updates: Sequence[Tuple[str, str, float]],
     ) -> None:
+        """
+        Persist a search event and update the user's category and tag aggregates.
+
+        :param user_id: Identifier of the user who submitted the query.
+        :param query: The raw search query string.
+        :param predicted_category: The top-predicted taxonomy category.
+        :param probabilities: Full probability distribution over all categories.
+        :param intent_probabilities: Predicted intent probability distribution.
+        :param tag_updates: Sequence of ``(tag, category, weight)`` tuples to
+            accumulate into ``user_tag_totals``.
+        """
         timestamp = self._now()
 
         with self.db.write_lock:
@@ -215,6 +256,14 @@ class UserEventStore:
                     )
 
     def record_feedback(self, user_id: str, query: str, true_category: str, confidence: float) -> None:
+        """
+        Persist an explicit feedback event for a user query.
+
+        :param user_id: Identifier of the user providing feedback.
+        :param query: The search query that received feedback.
+        :param true_category: The category selected by the user.
+        :param confidence: Confidence weight supplied with the feedback (0.1–2.0).
+        """
         with self.db.write_lock:
             with self.db.engine.begin() as connection:
                 connection.execute(
@@ -235,16 +284,38 @@ class UserEventStore:
                 )
 
     def clear_all(self, user_id: str) -> None:
+        """
+        Delete all per-user rows from every user-scoped table.
+
+        Global tables are not affected.
+
+        :param user_id: Identifier of the user whose data should be removed.
+        """
         with self.db.write_lock:
             with self.db.engine.begin() as connection:
-                connection.execute(text("DELETE FROM user_feedback_events WHERE user_id = :user_id"), {"user_id": user_id})
-                connection.execute(text("DELETE FROM user_search_events WHERE user_id = :user_id"), {"user_id": user_id})
-                connection.execute(text("DELETE FROM user_category_totals WHERE user_id = :user_id"), {"user_id": user_id})
-                connection.execute(text("DELETE FROM user_tag_totals WHERE user_id = :user_id"), {"user_id": user_id})
-                connection.execute(text("DELETE FROM user_embedding WHERE user_id = :user_id"), {"user_id": user_id})
-                connection.execute(text("DELETE FROM user_conversion_affinity WHERE user_id = :user_id"), {"user_id": user_id})
+                connection.execute(text(
+                    "DELETE FROM user_feedback_events WHERE user_id = :user_id"), {"user_id": user_id})
+                connection.execute(text(
+                    "DELETE FROM user_search_events WHERE user_id = :user_id"), {"user_id": user_id})
+                connection.execute(text(
+                    "DELETE FROM user_category_totals WHERE user_id = :user_id"), {"user_id": user_id})
+                connection.execute(text("DELETE FROM user_tag_totals WHERE user_id = :user_id"), {
+                                   "user_id": user_id})
+                connection.execute(text("DELETE FROM user_embedding WHERE user_id = :user_id"), {
+                                   "user_id": user_id})
+                connection.execute(text(
+                    "DELETE FROM user_conversion_affinity WHERE user_id = :user_id"), {"user_id": user_id})
 
     def increment_conversion_affinity(self, user_id: str, category: str, amount: float) -> None:
+        """
+        Add to the conversion-affinity score for a user and category.
+
+        Non-positive increments are silently ignored.
+
+        :param user_id: Identifier of the user.
+        :param category: The taxonomy category receiving the affinity increment.
+        :param amount: Amount to add to the current score.
+        """
         increment = max(0.0, float(amount))
         if increment <= 0.0:
             return
@@ -270,6 +341,15 @@ class UserEventStore:
                 )
 
     def get_conversion_affinity(self, user_id: str, categories: Sequence[str]) -> Dict[str, float]:
+        """
+        Retrieve the conversion-affinity scores for a user across the requested categories.
+
+        Categories with no stored score are returned as ``0.0``.
+
+        :param user_id: Identifier of the user.
+        :param categories: Ordered sequence of category keys to query.
+        :return: A dictionary mapping each requested category to its affinity score.
+        """
         requested = [str(category) for category in categories]
         if not requested:
             return {}
@@ -286,10 +366,20 @@ class UserEventStore:
                 {"user_id": user_id},
             ).mappings().all()
 
-        loaded = {str(row["category"]): max(0.0, float(row["score"])) for row in rows}
+        loaded = {str(row["category"]): max(
+            0.0, float(row["score"])) for row in rows}
         return {category: loaded.get(category, 0.0) for category in requested}
 
     def get_user_embedding(self, user_id: str, dimensions: int) -> List[float]:
+        """
+        Load the persisted user embedding vector, padding or truncating as needed.
+
+        Returns an all-zeros vector if no embedding has been stored yet.
+
+        :param user_id: Identifier of the user.
+        :param dimensions: Expected length of the returned vector.
+        :return: A list of floats of length ``dimensions``.
+        """
         safe_dimensions = max(1, int(dimensions))
 
         with self.db.engine.begin() as connection:
@@ -319,6 +409,12 @@ class UserEventStore:
             return [0.0] * safe_dimensions
 
     def set_user_embedding(self, user_id: str, vector: Sequence[float]) -> None:
+        """
+        Persist (upsert) the user embedding vector.
+
+        :param user_id: Identifier of the user.
+        :param vector: The embedding vector to store.
+        """
         serialized = json.dumps([float(value) for value in vector])
 
         with self.db.write_lock:
@@ -338,6 +434,16 @@ class UserEventStore:
                 )
 
     def get_top_segments(self, user_id: str, limit: int = 6) -> List[Dict[str, float]]:
+        """
+        Return the user's top audience segments with time-decayed scores.
+
+        Scores are weighted by an exponential decay keyed to the age of the
+        last update, using the configured ``SEGMENT_DECAY_LAMBDA``.
+
+        :param user_id: Identifier of the user.
+        :param limit: Maximum number of segments to return.
+        :return: A list of dicts with ``category``, ``score``, and ``probability`` keys.
+        """
         with self.db.engine.begin() as connection:
             rows = connection.execute(
                 text(
@@ -361,11 +467,13 @@ class UserEventStore:
                 updated_at = datetime.fromisoformat(updated_raw)
                 if updated_at.tzinfo is None:
                     updated_at = updated_at.replace(tzinfo=timezone.utc)
-                age_days = max(0.0, (now - updated_at).total_seconds() / 86400.0)
+                age_days = max(
+                    0.0, (now - updated_at).total_seconds() / 86400.0)
             except (TypeError, ValueError):
                 age_days = 0.0
 
-            adjusted_score = float(row["score"]) * math.exp(-decay_lambda * age_days)
+            adjusted_score = float(row["score"]) * \
+                math.exp(-decay_lambda * age_days)
             decayed_rows.append(
                 {
                     "category": row["category"],
@@ -384,6 +492,13 @@ class UserEventStore:
         ]
 
     def get_cloud_words(self, user_id: str, limit: int = 180) -> List[Dict[str, float]]:
+        """
+        Return the top weighted tags for the user's word cloud.
+
+        :param user_id: Identifier of the user.
+        :param limit: Maximum number of tag entries to return.
+        :return: A list of dicts with ``tag``, ``category``, and ``weight`` keys.
+        """
         with self.db.engine.begin() as connection:
             rows = connection.execute(
                 text(
@@ -408,6 +523,14 @@ class UserEventStore:
         ]
 
     def get_recent_searches(self, user_id: str, limit: int = 20) -> List[Dict[str, object]]:
+        """
+        Return the user's most recent search events, joined with any feedback.
+
+        :param user_id: Identifier of the user.
+        :param limit: Maximum number of search events to return (capped at 200).
+        :return: A list of dicts containing event details, top categories, top
+            intents, and optional feedback information.
+        """
         safe_limit = max(1, min(limit, 200))
 
         with self.db.engine.begin() as connection:
@@ -446,7 +569,8 @@ class UserEventStore:
         for row in rows:
             probabilities = json.loads(row["probabilities_json"])
             intent_probabilities = json.loads(row["intent_json"] or "{}")
-            ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
+            ranked = sorted(probabilities.items(),
+                            key=lambda item: item[1], reverse=True)
             ranked_intents = sorted(
                 intent_probabilities.items(),
                 key=lambda item: item[1],
@@ -463,7 +587,8 @@ class UserEventStore:
                         for intent, probability in ranked_intents[:3]
                     ],
                     "top_categories": [
-                        {"category": category, "probability": float(probability)}
+                        {"category": category,
+                            "probability": float(probability)}
                         for category, probability in ranked[:3]
                     ],
                     "feedback": {
@@ -485,12 +610,29 @@ class GlobalLearningStore:
     """
 
     def __init__(self, db: DatabaseStore) -> None:
+        """
+        Initialize the GlobalLearningStore.
+
+        :param db: Shared :class:`DatabaseStore` providing the engine and write lock.
+        """
         self.db = db
 
     def _now(self) -> str:
+        """
+        Return the current UTC timestamp as an ISO-8601 string.
+
+        :return: Current UTC time in ISO-8601 format.
+        """
         return datetime.now(timezone.utc).isoformat()
 
     def record_feedback(self, query: str, true_category: str, confidence: float) -> None:
+        """
+        Persist a feedback event in the global feedback log.
+
+        :param query: The search query that received feedback.
+        :param true_category: The confirmed correct taxonomy category.
+        :param confidence: Confidence weight of the feedback signal.
+        """
         with self.db.write_lock:
             with self.db.engine.begin() as connection:
                 connection.execute(
@@ -510,6 +652,14 @@ class GlobalLearningStore:
                 )
 
     def increment_conversion_affinity(self, category: str, amount: float) -> None:
+        """
+        Add to the global conversion-affinity score for a category.
+
+        Non-positive increments are silently ignored.
+
+        :param category: The taxonomy category receiving the affinity increment.
+        :param amount: Amount to add to the stored score.
+        """
         increment = max(0.0, float(amount))
         if increment <= 0.0:
             return
@@ -534,6 +684,14 @@ class GlobalLearningStore:
                 )
 
     def get_conversion_affinity(self, categories: Sequence[str]) -> Dict[str, float]:
+        """
+        Retrieve the global conversion-affinity scores for the requested categories.
+
+        Categories with no stored score are returned as ``0.0``.
+
+        :param categories: Ordered sequence of category keys to query.
+        :return: A dictionary mapping each requested category to its affinity score.
+        """
         requested = [str(category) for category in categories]
         if not requested:
             return {}
@@ -548,10 +706,16 @@ class GlobalLearningStore:
                 )
             ).mappings().all()
 
-        loaded = {str(row["category"]): max(0.0, float(row["score"])) for row in rows}
+        loaded = {str(row["category"]): max(
+            0.0, float(row["score"])) for row in rows}
         return {category: loaded.get(category, 0.0) for category in requested}
 
     def get_feedback_examples(self) -> List[Tuple[str, str, float]]:
+        """
+        Retrieve all stored global feedback examples.
+
+        :return: A list of ``(query, true_category, confidence)`` tuples.
+        """
         with self.db.engine.begin() as connection:
             rows = connection.execute(
                 text(

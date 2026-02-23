@@ -113,7 +113,18 @@ def get_current_user_id(
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ) -> str:
     """
-    Resolve stable user_id from JWT claims or X-User-Id header.
+    Resolve a stable ``user_id`` from JWT claims or the ``X-User-Id`` header.
+
+    JWT ``sub``, ``oid``, and ``user_id`` claims are checked in that order.
+    Falls back to the ``X-User-Id`` header when no token is present.
+
+    :param credentials: Bearer token credentials injected by FastAPI, or
+        ``None`` if no ``Authorization`` header was supplied.
+    :param x_user_id: Optional ``X-User-Id`` header value used as a fallback
+        identity in non-production environments.
+    :return: The resolved user identifier string.
+    :raises HTTPException: With HTTP 401 if the token scheme is unsupported,
+        the token is invalid, or no identity can be determined.
     """
     if credentials is not None:
         if credentials.scheme.lower() != "bearer":
@@ -243,8 +254,10 @@ def conversion_click(
         category=payload.category,
         amount=payload.intensity,
     )
-    global_store.increment_conversion_affinity(payload.category, payload.intensity)
-    affinities = user_store.get_conversion_affinity(user_id=user_id, categories=CATEGORY_LIST)
+    global_store.increment_conversion_affinity(
+        payload.category, payload.intensity)
+    affinities = user_store.get_conversion_affinity(
+        user_id=user_id, categories=CATEGORY_LIST)
     return {
         "status": "tracked",
         "tag": payload.tag,
@@ -278,7 +291,8 @@ def search(
         decay=0.95,
         learning_rate=0.05,
     )
-    user_store.set_user_embedding(user_id=user_id, vector=updated_user_embedding)
+    user_store.set_user_embedding(
+        user_id=user_id, vector=updated_user_embedding)
     embedding_probabilities = model_service.category_probabilities_from_user_embedding(
         updated_user_embedding)
 
@@ -314,9 +328,11 @@ def search(
         user_id=user_id,
         categories=CATEGORY_LIST,
     )
-    global_conversion_affinity = global_store.get_conversion_affinity(CATEGORY_LIST)
+    global_conversion_affinity = global_store.get_conversion_affinity(
+        CATEGORY_LIST)
     smoothed_conversion = {
-        category: user_conversion_affinity.get(category, 0.0) + global_conversion_affinity.get(category, 0.0) + 1.0
+        category: user_conversion_affinity.get(
+            category, 0.0) + global_conversion_affinity.get(category, 0.0) + 1.0
         for category in CATEGORY_LIST
     }
     conversion_total = sum(smoothed_conversion.values()) or 1.0

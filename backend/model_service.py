@@ -34,8 +34,8 @@ class TaxonomyModelService:
         self.categories: List[str] = list(CATEGORY_LIST)
         self.embedding_model_name = "all-MiniLM-L6-v2"
         self.embedding_model = SentenceTransformer(self.embedding_model_name)
-        self.embedding_dimensions = int(
-            self.embedding_model.get_sentence_embedding_dimension())
+        dimension = self.embedding_model.get_sentence_embedding_dimension()
+        self.embedding_dimensions = int(dimension) if dimension is not None else 384
 
         self.classifier = MLPClassifier(
             hidden_layer_sizes=(192, 64),
@@ -71,7 +71,7 @@ class TaxonomyModelService:
                     and isinstance(loaded_categories, list)
                     and loaded_embedding_model_name == self.embedding_model_name
                 ):
-                    loaded_classifier.early_stopping = False
+                    setattr(loaded_classifier, "early_stopping", False)
                     self.classifier = loaded_classifier
                     self.categories = [str(category)
                                        for category in loaded_categories]
