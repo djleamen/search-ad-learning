@@ -40,10 +40,6 @@ backed by a Python machine-learning taxonomy service.
   - `model_service.py` model training/inference/online updates
   - `store.py` persistent event and aggregate store
 
-## Try it out
-Visit the site [here](https://proud-pond-0b23fea0f.4.azurestaticapps.net).
-
-
 ## Azure deployment target
 
 - Frontend: Azure Static Web Apps
