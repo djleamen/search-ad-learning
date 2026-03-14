@@ -6,4 +6,4 @@ joblib==1.4.2
 sentence-transformers==3.4.1
 SQLAlchemy==2.0.38
 psycopg[binary]==3.2.6
-PyJWT==2.10.1
+PyJWT==2.12.0
