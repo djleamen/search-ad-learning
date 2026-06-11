@@ -167,7 +167,7 @@ def health() -> Dict[str, str]:
     Health check endpoint.
     :return: A simple status message indicating the service is running.
     """
-    return {"status": "ok", "model": "sgd-log-loss-hashing+user-embedding"}
+    return {"status": "ok", "model": "mlp-sentence-embedding+user-embedding"}
 
 
 @app.get("/taxonomy")

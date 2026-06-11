@@ -18,8 +18,7 @@ from .taxonomy_data import CATEGORY_LIST, TAXONOMY, build_seed_corpus
 class TaxonomyModelService:
     """
     Taxonomy Model Service for managing the machine learning model.
-    Uses a stochastic gradient descent classifier with log loss and 
-    a hashing vectorizer for text features. 
+    Uses an MLP classifier over normalized sentence-embedding features.
     """
 
     def __init__(self, artifact_dir: Path) -> None:
