@@ -74,9 +74,17 @@ ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
+# Local development origins used when CORS_ALLOWED_ORIGINS is not configured.
+# Falling back to these (rather than "*") keeps an unconfigured production
+# deployment from accepting requests from any origin.
+DEFAULT_DEV_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"],
+    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else DEFAULT_DEV_ORIGINS,
     allow_credentials=bool(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
