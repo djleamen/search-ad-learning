@@ -74,9 +74,29 @@ ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
+# Localhost origins for local development. These are only used when CORS is
+# not explicitly configured AND dev CORS is explicitly opted into via
+# ENABLE_DEV_CORS, so an unconfigured production deployment fails closed (no
+# cross-origin access) rather than silently allowing any — or any localhost —
+# origin.
+DEFAULT_DEV_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+DEV_CORS_ENABLED = os.getenv("ENABLE_DEV_CORS", "").strip().lower() in {
+    "1", "true", "yes",
+}
+
+if ALLOWED_ORIGINS:
+    cors_origins = ALLOWED_ORIGINS
+elif DEV_CORS_ENABLED:
+    cors_origins = DEFAULT_DEV_ORIGINS
+else:
+    cors_origins = []
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"],
+    allow_origins=cors_origins,
     allow_credentials=bool(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
