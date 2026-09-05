@@ -53,7 +53,7 @@ For production, use Entra ID / B2C issued JWTs and avoid `X-User-Id` fallback.
 ### Backend container build (local)
 
 ```bash
-docker build -f backend/Dockerfile -t search-ad-learning-backend:latest .
+docker build -t search-ad-learning-backend:latest backend
 docker run --rm -p 8001:8001 \
   -e DATABASE_URL="postgresql+psycopg://<user>:<password>@<host>:5432/<db>" \
   search-ad-learning-backend:latest
@@ -65,7 +65,7 @@ docker run --rm -p 8001:8001 \
 - `GET /taxonomy`
 - `POST /search` with `{ "query": "..." }`
 - `POST /feedback` with `{ "query": "...", "category": "...", "confidence": 1.0 }`
-- `POST /retrain`
+- `POST /retrain` (requires a verified Bearer JWT; `X-User-Id` is not accepted because it rewrites the shared global model)
 
 # Search Ad Learning
 
@@ -126,7 +126,7 @@ Core API endpoints:
 - `GET /health`
 - `POST /search`
 - `POST /feedback`
-- `POST /retrain`
+- `POST /retrain` (requires a verified Bearer JWT; `X-User-Id` is not accepted because it rewrites the shared global model)
 - `POST /history/clear`
 - `POST /conversion/click`
 

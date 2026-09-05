@@ -10,9 +10,6 @@ on:
       - 'infra/**'
       - 'backend/**'
       - 'frontend/**'
-      - 'index.html'
-      - 'app.js'
-      - 'styles.css'
       - '.github/workflows/azure-deploy.yml'
 
 permissions:

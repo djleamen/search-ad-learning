@@ -128,6 +128,40 @@ class ConversionClickRequest(BaseModel):
     intensity: float = Field(default=1.0, ge=0.1, le=3.0)
 
 
+def _user_id_from_token(credentials: HTTPAuthorizationCredentials) -> str | None:
+    """
+    Verify a bearer token and return the identity claim it carries.
+
+    :param credentials: Bearer credentials from the Authorization header.
+    :return: The first non-empty ``sub``/``oid``/``user_id`` claim, or ``None``
+        if the token verifies but carries no usable identity.
+    :raises HTTPException: With HTTP 401 if the scheme is unsupported, no
+        signing secret is configured, or the token fails verification.
+    """
+    if credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unsupported authorization scheme",
+        )
+    if not AUTH_JWT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed",
+        )
+    try:
+        claims = jwt.decode(credentials.credentials, AUTH_JWT_SECRET, algorithms=["HS256"])
+    except jwt.InvalidTokenError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid auth token",
+        ) from error
+    for key in ("sub", "oid", "user_id"):
+        value = claims.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def get_current_user_id(
     credentials: HTTPAuthorizationCredentials | None = Depends(auth_scheme),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
@@ -147,30 +181,9 @@ def get_current_user_id(
         the token is invalid, or no identity can be determined.
     """
     if credentials is not None:
-        if credentials.scheme.lower() != "bearer":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unsupported authorization scheme",
-            )
-
-        token = credentials.credentials
-        try:
-            if not AUTH_JWT_SECRET:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Authentication failed",
-                )
-            claims = jwt.decode(token, AUTH_JWT_SECRET, algorithms=["HS256"])
-        except jwt.InvalidTokenError as error:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid auth token",
-            ) from error
-
-        for key in ("sub", "oid", "user_id"):
-            value = claims.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+        user_id = _user_id_from_token(credentials)
+        if user_id:
+            return user_id
 
     if x_user_id and x_user_id.strip():
         return x_user_id.strip()
@@ -179,6 +192,31 @@ def get_current_user_id(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Missing user identity. Provide Bearer token or X-User-Id header.",
     )
+
+
+def get_verified_user_id(
+    credentials: HTTPAuthorizationCredentials | None = Depends(auth_scheme),
+) -> str:
+    """
+    Resolve a user id from a verified JWT only; the ``X-User-Id`` header is
+    not accepted. Use for endpoints that mutate shared, global state.
+
+    :param credentials: Bearer token credentials, or ``None`` if absent.
+    :return: The verified user identifier.
+    :raises HTTPException: With HTTP 401 when no valid token is presented.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A verified Bearer token is required for this operation.",
+        )
+    user_id = _user_id_from_token(credentials)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token carries no user identity.",
+        )
+    return user_id
 
 
 @app.get("/health")
@@ -476,9 +514,13 @@ def feedback(
 
 
 @app.post("/retrain")
-def retrain(user_id: str = Depends(get_current_user_id)) -> Dict[str, object]:
+def retrain(user_id: str = Depends(get_verified_user_id)) -> Dict[str, object]:
     """
     Retrain the model using the initial training data and feedback examples.
+
+    Retraining rewrites the shared global model, so unlike the per-user
+    endpoints it requires a verified JWT rather than the ``X-User-Id`` header
+    any browser can set.
     :return: A dictionary containing the status and the number of categories.
     """
     model_service.train_initial_model()
