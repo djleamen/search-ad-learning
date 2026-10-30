@@ -4,12 +4,15 @@ Taxonomy Model Service for managing the machine learning model.
 
 from __future__ import annotations
 
+import os
+import threading
 from pathlib import Path
 from typing import Dict, List, Sequence
 
 import joblib
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from sklearn.base import clone
 from sklearn.neural_network import MLPClassifier
 
 from .taxonomy_data import CATEGORY_LIST, TAXONOMY, build_seed_corpus
@@ -29,6 +32,13 @@ class TaxonomyModelService:
         self.artifact_dir = artifact_dir
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
         self.artifact_file = self.artifact_dir / "taxonomy_model.joblib"
+        # FastAPI runs sync endpoints in a threadpool, so /search, /feedback and
+        # /retrain can touch the classifier concurrently. partial_fit mutates
+        # weights in place and save() writes one shared file, so both are
+        # serialized; embedding (the slow part) stays outside the lock.
+        # ponytail: one process-wide lock; per-worker models or a queue if
+        # online-update throughput ever matters.
+        self._lock = threading.RLock()
 
         self.categories: List[str] = list(CATEGORY_LIST)
         self.embedding_model_name = "all-MiniLM-L6-v2"
@@ -77,7 +87,10 @@ class TaxonomyModelService:
                     self.category_prototypes = self._build_category_prototypes()
                     self.is_trained = True
                     return
-            except (OSError, ValueError, TypeError, KeyError):
+            except Exception:  # pylint: disable=broad-except
+                # A truncated/corrupt artifact (EOFError, UnpicklingError) or
+                # one pickled by another sklearn version must not crash-loop
+                # the service: fall back to retraining from the seed corpus.
                 pass
 
         self.train_initial_model()
@@ -91,7 +104,12 @@ class TaxonomyModelService:
             "categories": self.categories,
             "embedding_model_name": self.embedding_model_name,
         }
-        joblib.dump(payload, self.artifact_file)
+        with self._lock:
+            # Write then atomically rename so a crash or concurrent writer can
+            # never leave a torn artifact behind.
+            tmp_file = self.artifact_file.with_suffix(".joblib.tmp")
+            joblib.dump(payload, tmp_file)
+            os.replace(tmp_file, self.artifact_file)
 
     def _encode_texts(self, texts: Sequence[str]) -> np.ndarray:
         """
@@ -119,10 +137,15 @@ class TaxonomyModelService:
         labels = np.array([label for _, label in samples])
 
         x_matrix = self._encode_texts(texts)
-        self.classifier.fit(x_matrix, labels)
+        # Fit a fresh copy and swap it in, so requests keep using the old model
+        # instead of a half-trained one while /retrain runs.
+        classifier = clone(self.classifier)
+        classifier.fit(x_matrix, labels)
 
-        self.is_trained = True
-        self.save()
+        with self._lock:
+            self.classifier = classifier
+            self.is_trained = True
+            self.save()
 
     def _normalize_vector(self, vector: np.ndarray) -> np.ndarray:
         """
@@ -185,7 +208,8 @@ class TaxonomyModelService:
             self.train_initial_model()
 
         x_matrix = self._encode_texts([query])
-        probabilities = self.classifier.predict_proba(x_matrix)[0]
+        with self._lock:
+            probabilities = self.classifier.predict_proba(x_matrix)[0]
 
         paired = sorted(zip(self.categories, probabilities),
                         key=lambda item: item[1], reverse=True)
@@ -210,13 +234,13 @@ class TaxonomyModelService:
         x_matrix = np.repeat(x_base, repeat_count, axis=0)
         y = np.array([category] * repeat_count)
 
-        if hasattr(self.classifier, "classes_"):
-            self.classifier.partial_fit(x_matrix, y)
-        else:
-            self.classifier.partial_fit(
-                x_matrix, y, classes=np.array(self.categories))
-
-        self.save()
+        with self._lock:
+            if hasattr(self.classifier, "classes_"):
+                self.classifier.partial_fit(x_matrix, y)
+            else:
+                self.classifier.partial_fit(
+                    x_matrix, y, classes=np.array(self.categories))
+            self.save()
 
     def update_user_embedding(
         self,

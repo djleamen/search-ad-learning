@@ -164,7 +164,8 @@ def _user_id_from_token(credentials: HTTPAuthorizationCredentials) -> str | None
 
 def get_current_user_id(
     credentials: HTTPAuthorizationCredentials | None = Depends(auth_scheme),
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    # Bounded: the value becomes a primary-key component in every user_* table.
+    x_user_id: str | None = Header(default=None, alias="X-User-Id", max_length=128),
 ) -> str:
     """
     Resolve a stable ``user_id`` from JWT claims or the ``X-User-Id`` header.
