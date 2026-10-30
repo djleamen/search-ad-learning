@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # taxonomy_data is pure Python; the model service needs torch and is
-      # exercised at deploy time, so keep CI to what runs in seconds.
-      - run: pip install pytest
+      # The model-service tests stub sentence-transformers, so CI needs the
+      # scikit-learn stack but not torch. Versions mirror backend/requirements.txt.
+      - run: pip install pytest scikit-learn==1.6.1 numpy==2.0.2 joblib==1.4.2
       - run: pytest backend/tests -q
