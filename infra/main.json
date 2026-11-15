@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.40.2.10011",
-      "templateHash": "1145709467430009003"
+      "templateHash": "8482876594310875662"
     }
   },
   "parameters": {
@@ -579,6 +579,9 @@
           },
           "authJwtSecretValue": {
             "value": "[parameters('authJwtSecret')]"
+          },
+          "corsAllowedOrigins": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'frontend'), '2025-04-01').outputs.frontendUrl.value]"
           }
         },
         "template": {
@@ -588,7 +591,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "9693453507919429750"
+              "templateHash": "13725999569393156651"
             }
           },
           "parameters": {
@@ -630,6 +633,13 @@
             },
             "authJwtSecretValue": {
               "type": "securestring"
+            },
+            "corsAllowedOrigins": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Comma-separated browser origins allowed to call the backend (CORS). The backend fails closed when this is empty."
+              }
             }
           },
           "variables": {
@@ -711,6 +721,10 @@
                         {
                           "name": "APPINSIGHTS_CONNECTION_STRING",
                           "value": "[parameters('appInsightsConnectionString')]"
+                        },
+                        {
+                          "name": "CORS_ALLOWED_ORIGINS",
+                          "value": "[parameters('corsAllowedOrigins')]"
                         }
                       ],
                       "resources": {
@@ -752,6 +766,7 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Resources/deployments', 'acr')]",
+        "[resourceId('Microsoft.Resources/deployments', 'frontend')]",
         "[resourceId('Microsoft.Resources/deployments', 'monitoring')]",
         "[resourceId('Microsoft.Resources/deployments', 'postgres')]"
       ]

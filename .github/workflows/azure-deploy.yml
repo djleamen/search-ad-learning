@@ -20,7 +20,9 @@ env:
   AZURE_ENV_NAME: dev
   AZURE_LOCATION: eastus2
   STATIC_WEB_APP_LOCATION: eastus2
-  POSTGRES_LOCATION: eastus2
+  # eastus2 rejects new Burstable Postgres servers on this subscription
+  # (SkuNotAvailable), so the database lives in a neighbouring region.
+  POSTGRES_LOCATION: centralus
   AZURE_RESOURCE_GROUP: rg-search-ad-learning-dev
 
 jobs:
@@ -177,6 +179,21 @@ jobs:
 
       - name: Deploy backend
         run: azd deploy --no-prompt --service backend
+
+      # The Container Apps hostname changes whenever the environment is
+      # recreated, so write the provisioned backend URL into the page instead of
+      # relying on a hardcoded value in the repo.
+      - name: Point frontend at the provisioned backend
+        run: |
+          set -euo pipefail
+          BACKEND_URL="$(azd env get-value SERVICE_BACKEND_URI)"
+          BACKEND_URL="${BACKEND_URL%/}"
+          if [[ "$BACKEND_URL" != https://* ]]; then
+            echo "SERVICE_BACKEND_URI is missing or not https: '${BACKEND_URL}'"
+            exit 1
+          fi
+          sed -i -E "s#(<meta name=\"backend-url\" content=\")[^\"]*#\1${BACKEND_URL}#" frontend/index.html
+          grep -F "content=\"${BACKEND_URL}\"" frontend/index.html
 
       - name: Deploy frontend (retry for SWA readiness)
         run: |

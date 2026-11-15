@@ -15,6 +15,8 @@ param appInsightsConnectionString string
 param databaseUrlSecretValue string
 @secure()
 param authJwtSecretValue string
+@description('Comma-separated browser origins allowed to call the backend (CORS). The backend fails closed when this is empty.')
+param corsAllowedOrigins string = ''
 
 var registryName = split(registryServer, '.')[0]
 var registryUsername = listCredentials(resourceId('Microsoft.ContainerRegistry/registries', registryName), '2023-07-01').username
@@ -92,6 +94,10 @@ resource backendApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'APPINSIGHTS_CONNECTION_STRING'
               value: appInsightsConnectionString
+            }
+            {
+              name: 'CORS_ALLOWED_ORIGINS'
+              value: corsAllowedOrigins
             }
           ]
           resources: {
