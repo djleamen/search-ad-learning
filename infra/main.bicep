@@ -105,6 +105,9 @@ module backend './modules/containerapp.bicep' = {
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     databaseUrlSecretValue: 'postgresql+psycopg://${uriComponent(postgresAdminUsername)}:${uriComponent(postgresAdminPassword)}@${postgres.outputs.postgresFqdn}:5432/${postgresDatabaseName}?sslmode=require'
     authJwtSecretValue: authJwtSecret
+    // The backend allows no cross-origin requests unless told which origins
+    // to trust, so the deployed frontend must be listed here.
+    corsAllowedOrigins: frontend.outputs.frontendUrl
   }
 }
 
