@@ -245,18 +245,24 @@ Future improvements:
 
 ## Backend
 
+Requires Python 3.10 or newer (CI and the Docker image use 3.11). On macOS the
+system `python3` is 3.9, so name a newer interpreter explicitly.
+
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
+# Optional: without DATABASE_URL the backend uses SQLite at backend/runtime/events.db
 export DATABASE_URL="postgresql+psycopg://<user>:<password>@<host>:5432/<db>"
-uvicorn backend.main:app --host 127.0.0.1 --port 8001 --reload
+# ENABLE_DEV_CORS=1 lets the page on localhost:8000 call the backend.
+# Without it the backend rejects every cross-origin request.
+ENABLE_DEV_CORS=1 uvicorn backend.main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
 ## Frontend
 
 ```bash
-python3 -m http.server 8000
+python3 -m http.server 8000 --directory frontend
 ```
 
 Open:
